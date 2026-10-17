@@ -2,8 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
-import { logAuditEvent } from "@/lib/audit";
 import type { QuestionStatus } from "@/types/database";
 
 export type ActionState = { error: string | null; success: string | null };
@@ -31,14 +29,9 @@ export async function submitQuestionAction(_prev: ActionState, formData: FormDat
 export async function setQuestionStatusAction(questionId: string, status: string): Promise<{ error?: string }> {
   if (!STATUSES.includes(status as QuestionStatus)) return { error: "حالة غير صحيحة" };
   const supabase = createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
   const { error } = await supabase.rpc("symposium_set_status", { q: questionId, s: status as QuestionStatus });
   if (error) return { error: "تعذّر تغيير الحالة" };
-  if (user) {
-    await logAuditEvent(createServiceClient(), { actorId: user.id, action: "change_question_status", entityType: "symposium_question", entityId: questionId, details: { status } });
-  }
+  // التسجيل في audit_log بيحصل داخل دالة symposium_set_status نفسها في قاعدة البيانات.
   revalidatePath("/servant/symposium");
   revalidatePath("/admin/symposium");
   return {};
@@ -46,14 +39,9 @@ export async function setQuestionStatusAction(questionId: string, status: string
 
 export async function assignQuestionAction(questionId: string, servantId: string): Promise<{ error?: string }> {
   const supabase = createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
   const { error } = await supabase.rpc("symposium_assign", { q: questionId, a: servantId || null });
   if (error) return { error: "تعذّر تعيين السؤال" };
-  if (user) {
-    await logAuditEvent(createServiceClient(), { actorId: user.id, action: "assign_question", entityType: "symposium_question", entityId: questionId, details: { assigned_to: servantId || null } });
-  }
+  // التسجيل في audit_log بيحصل داخل دالة symposium_assign نفسها في قاعدة البيانات.
   revalidatePath("/servant/symposium");
   revalidatePath("/admin/symposium");
   return {};

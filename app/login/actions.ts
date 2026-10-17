@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizePhone, phoneToAuthEmail } from "@/lib/phone";
 import { homePathForRole, type AppRole } from "@/lib/roles";
-import { logAuditEvent } from "@/lib/audit";
+import { logAuditEvent, audit } from "@/lib/audit";
 
 const IP_MAX_FAILS = 20; // أعلى من حد الهاتف (5) لأن خدام كتير ممكن يشاركوا نفس شبكة الكنيسة
 
@@ -49,6 +49,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   // وبالـ IP معًا — IP واحد ممكن يكون شبكة كنيسة كاملة، فحده أعلى.
   const { data: phoneCheck } = await serviceClient.rpc("login_rate_limit_check", { p_identifier: normalized });
   if (phoneCheck && phoneCheck.allowed === false) {
+    await audit({ actorId: null, action: "login_blocked", entityType: "session", details: { phone: normalized, ip, reason: "phone" } });
     return {
       error: `محاولات دخول كثيرة جدًا. برجاء الانتظار ${formatWaitTime(phoneCheck.retry_after_seconds)} ثم المحاولة مرة أخرى.`
     };
@@ -59,6 +60,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       p_max_fails: IP_MAX_FAILS
     });
     if (ipCheck && ipCheck.allowed === false) {
+      await audit({ actorId: null, action: "login_blocked", entityType: "session", details: { phone: normalized, ip, reason: "ip" } });
       return {
         error: `محاولات دخول كثيرة جدًا من نفس الشبكة. برجاء الانتظار ${formatWaitTime(ipCheck.retry_after_seconds)} ثم المحاولة مرة أخرى.`
       };
@@ -83,6 +85,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
 
   if (error || !data.user) {
+    // محاولة دخول غلط: المنفّذ غير معروف، فبنسجّل الرقم اللي اتكتب والـ IP.
+    await logAuditEvent(serviceClient, { actorId: null, action: "login_failed", entityType: "session", details: { phone: normalized, ip } });
     return { error: "رقم الهاتف أو كلمة المرور غير صحيحة." };
   }
 
@@ -93,17 +97,18 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     .single();
 
   if (!profile) {
+    await logAuditEvent(serviceClient, { actorId: null, action: "login_failed", entityType: "session", entityId: data.user.id, details: { phone: normalized, ip, reason: "no_profile" } });
     await supabase.auth.signOut();
     return { error: "لا يوجد حساب مرتبط بهذا الرقم في النظام." };
   }
 
   if (profile.status === "disabled") {
+    await logAuditEvent(serviceClient, { actorId: data.user.id, action: "login_disabled", entityType: "session", details: ip ? { ip } : {} });
     await supabase.auth.signOut();
     return { error: "هذا الحساب معطّل حاليًا. برجاء التواصل مع أمين الخدمة." };
   }
 
-  // تسجيل دخول ناجح فقط (الفشل متابَع بالفعل عن طريق تقييد المحاولات فوق).
-  // بيانات قليلة جدًا (معرّف المستخدم + الـ IP) عشان السجل يفضل خفيف.
+  // تسجيل دخول ناجح (المحاولات الفاشلة والمحظورة بتتسجّل فوق).
   await logAuditEvent(serviceClient, { actorId: data.user.id, action: "login", entityType: "session", details: ip ? { ip } : {} });
 
   redirect(homePathForRole(profile.role as AppRole));

@@ -1,9 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { toChildRow } from "@/lib/childRow";
 import { relativeArabicDate } from "@/lib/format";
-import { Icon } from "@/components/ui/Icon";
+import { TodayAttendanceButtons } from "@/components/home/TodayAttendanceButtons";
 import { Tile, WideTile, Pending, Muted, ProgressRing } from "@/components/home/Tiles";
 
 type NotificationRow = { id: string; notifications: { title: string; sent_at: string | null } | null };
@@ -101,14 +100,7 @@ export default async function ServantHomePage() {
         />
       )}
 
-      <Link
-        href="/servant/attendance"
-        prefetch={false}
-        className="col-span-2 h-[56px] rounded-[18px] bg-primary text-parchment text-base font-extrabold flex items-center justify-center gap-2 mt-1.5"
-      >
-        <Icon name="clipboard" size={20} />
-        تسجيل حضور
-      </Link>
+      <TodayAttendanceButtons basePath="/servant/attendance" />
     </div>
   );
 }

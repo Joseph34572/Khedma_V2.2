@@ -3,6 +3,25 @@ import { getCurrentProfile } from "@/lib/auth";
 import { PrayerRunner } from "@/components/PrayerRunner";
 import { AgpeyaReader } from "@/components/prayer/AgpeyaReader";
 
+/** أول كلمات المزمور (لحد أول علامة ترقيم، بحد أقصى 4 كلمات) — بتتاخد من نص المصدر نفسه. */
+function psalmIncipit(body: string): string {
+  const firstLine = body.trim().split("\n")[0] ?? "";
+  const clause = firstLine.split(/[،,.:؛!?؟]/)[0] ?? "";
+  return clause.trim().split(/\s+/).slice(0, 4).join(" ");
+}
+
+/**
+ * عنوان الجزء للعرض: المزامير بيتكتب جنبها اسمها بين قوسين (أول كلماتها)، ورقم
+ * الترتيب اللي في أول العنوان في المصدر، زي "(1)"، بيتشال لأن الأجزاء مترقمة أصلًا.
+ * ده عرض بس — النص المحفوظ في القاعدة زي ما هو.
+ */
+function displayTitle(title: string, body: string): string {
+  if (!title.includes("المزمور")) return title;
+  const clean = title.replace(/^\(\d+\)\s*/, "");
+  const incipit = psalmIncipit(body);
+  return incipit ? `${clean} (${incipit})` : clean;
+}
+
 /**
  * صفحة صلاة واحدة (للولد والخادم): لو الصلاة متقسّمة لأجزاء (prayer_sections) بتفتح
  * قارئ الأجبية بالأجزاء والسحب، ولو لسه نص واحد بس بتفتح PrayerRunner القديم.
@@ -24,7 +43,7 @@ export async function PrayerHourPage({ prayerId, backHref }: { prayerId: string;
       <AgpeyaReader
         prayerContentId={prayer.id}
         title={prayer.title_ar}
-        sections={parts.map((s) => ({ id: s.id, title: s.title_ar, body: s.body_ar }))}
+        sections={parts.map((s) => ({ id: s.id, title: displayTitle(s.title_ar, s.body_ar), body: s.body_ar }))}
         backHref={backHref}
       />
     );

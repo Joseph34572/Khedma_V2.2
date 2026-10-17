@@ -1,3 +1,4 @@
+import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 import { StatusBadge } from "./ui/StatusBadge";
 
@@ -25,7 +26,7 @@ export function PrayerList({ items, basePath }: { items: PrayerListItem[]; baseP
           className="flex items-center justify-between bg-white rounded-card border border-line p-4 hover:border-primary transition-colors"
         >
           <span className="font-bold text-ink">{p.title_ar}</span>
-          {p.completedToday ? <StatusBadge tone="good">✅ تمت اليوم</StatusBadge> : <StatusBadge tone="muted">لم تبدأ اليوم</StatusBadge>}
+          {p.completedToday ? <StatusBadge tone="good">تمت اليوم</StatusBadge> : <StatusBadge tone="muted">لم تبدأ اليوم</StatusBadge>}
         </Link>
       ))}
     </div>

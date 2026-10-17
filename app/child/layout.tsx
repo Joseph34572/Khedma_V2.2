@@ -4,14 +4,14 @@ import { AppShell, type NavItem } from "@/components/AppShell";
 import { ROLE_LABELS } from "@/lib/roles";
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/child", label: "الرئيسية", icon: "🏠" },
-  { href: "/child/prayer", label: "الصلاة", icon: "🕊️" },
-  { href: "/child/bible", label: "الكتاب المقدس", icon: "📖" },
-  { href: "/child/mass", label: "الحضور", icon: "📋" },
-  { href: "/child/quizzes", label: "المسابقات", icon: "🏆" },
-  { href: "/child/symposium", label: "صندوق الندوة", icon: "💬" },
-  { href: "/child/notifications", label: "الإشعارات", icon: "🔔" },
-  { href: "/child/account", label: "حسابي", icon: "🪪" }
+  { href: "/child", label: "الرئيسية", icon: "home" },
+  { href: "/child/prayer", label: "الصلاة", icon: "cross" },
+  { href: "/child/bible", label: "الكتاب المقدس", icon: "book" },
+  { href: "/child/mass", label: "الحضور", icon: "clipboard" },
+  { href: "/child/quizzes", label: "المسابقات", icon: "trophy" },
+  { href: "/child/symposium", label: "صندوق الندوة", icon: "chat" },
+  { href: "/child/notifications", label: "الإشعارات", icon: "bell" },
+  { href: "/child/account", label: "حسابي", icon: "idcard" }
 ];
 
 export default async function ChildLayout({ children }: { children: React.ReactNode }) {

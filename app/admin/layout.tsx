@@ -13,17 +13,17 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!isManagementRole(role)) redirect(homePathForRole(role));
 
   const navItems: NavItem[] = [
-    { href: "/admin", label: "الرئيسية", icon: "🏠" },
-    ...(canManageUsers(role) ? [{ href: "/admin/users", label: "المستخدمون", icon: "👤" }] : []),
-    { href: "/admin/children", label: "الأولاد", icon: "🧒" },
-    { href: "/admin/servants", label: "الخدام", icon: "👥" },
-    { href: "/admin/attendance", label: "الحضور", icon: "📋" },
-    ...(canManageContent(role) ? [{ href: "/admin/content/prayer", label: "محتوى الصلاة", icon: "🕊️" }] : []),
-    ...(canManageContent(role) ? [{ href: "/admin/content/bible", label: "الكتاب المقدس", icon: "📖" }] : []),
-    { href: "/admin/quizzes", label: "المسابقات", icon: "🏆" },
-    { href: "/admin/symposium", label: "صندوق الندوة", icon: "💬" },
-    { href: "/admin/notifications", label: "الإشعارات", icon: "🔔" },
-    ...(canManageUsers(role) ? [{ href: "/admin/audit-log", label: "سجل العمليات", icon: "🗂️" }] : [])
+    { href: "/admin", label: "الرئيسية", icon: "home" },
+    ...(canManageUsers(role) ? ([{ href: "/admin/users", label: "المستخدمون", icon: "user" }] satisfies NavItem[]) : []),
+    { href: "/admin/children", label: "الأولاد", icon: "child" },
+    { href: "/admin/servants", label: "الخدام", icon: "users" },
+    { href: "/admin/attendance", label: "الحضور", icon: "clipboard" },
+    ...(canManageContent(role) ? ([{ href: "/admin/content/prayer", label: "محتوى الصلاة", icon: "cross" }] satisfies NavItem[]) : []),
+    ...(canManageContent(role) ? ([{ href: "/admin/content/bible", label: "الكتاب المقدس", icon: "book" }] satisfies NavItem[]) : []),
+    { href: "/admin/quizzes", label: "المسابقات", icon: "trophy" },
+    { href: "/admin/symposium", label: "صندوق الندوة", icon: "chat" },
+    { href: "/admin/notifications", label: "الإشعارات", icon: "bell" },
+    ...(canManageUsers(role) ? ([{ href: "/admin/audit-log", label: "سجل العمليات", icon: "folder" }] satisfies NavItem[]) : [])
   ];
 
   return (

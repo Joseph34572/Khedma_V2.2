@@ -46,7 +46,7 @@ export function AppShell({
     <div className="min-h-screen lg:flex">
       <aside className="hidden lg:flex lg:w-64 lg:flex-col border-l border-line bg-white p-4">
         <div className="flex items-center gap-3 px-2 py-3 mb-4">
-          <div className="h-10 w-10 -rotate-6 rounded-xl bg-gold flex items-center justify-center text-primary-dark">
+          <div className="h-10 w-10 rounded-xl bg-gold flex items-center justify-center text-primary-dark">
             <Icon name="cross" size={20} />
           </div>
           <p className="font-extrabold text-ink leading-none">خدمة إعدادي</p>
@@ -81,18 +81,18 @@ export function AppShell({
       </aside>
 
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
-        <header className="anim-drop relative overflow-hidden bg-primary text-parchment px-5 pt-5 pb-8 rounded-b-[32px] lg:mx-8 lg:mt-4 lg:rounded-[28px] lg:pb-6">
+        <header className="relative overflow-hidden bg-primary text-parchment px-5 pt-5 pb-8 rounded-b-[32px] lg:mx-8 lg:mt-4 lg:rounded-[28px] lg:pb-6">
           <span aria-hidden className="anim-float absolute top-5 left-8 h-2.5 w-2.5 rounded-full bg-gold opacity-70" />
           <span aria-hidden className="anim-float absolute top-16 left-20 h-1.5 w-1.5 rounded-full bg-gold opacity-50 [animation-delay:0.8s]" />
           <span aria-hidden className="anim-float absolute top-24 left-5 h-3.5 w-3.5 rounded-full bg-gold opacity-35 [animation-delay:1.6s]" />
           <div className="relative flex items-center gap-3">
-            <div className="h-12 w-12 flex-none -rotate-6 rounded-2xl bg-gold flex items-center justify-center text-primary-dark lg:hidden">
+            <div className="h-12 w-12 flex-none rounded-2xl bg-gold flex items-center justify-center text-primary-dark lg:hidden">
               <Icon name="cross" size={22} />
             </div>
             <div className="min-w-0">
               <p className="text-[13px] font-medium text-gold-light">{roleLabel}</p>
               <p className="text-[22px] font-extrabold leading-tight truncate">
-                <span className="anim-wave">أهلًا {firstName}</span>
+                أهلًا {firstName}
               </p>
             </div>
             <form action={signOutAction} className="ms-auto lg:hidden">

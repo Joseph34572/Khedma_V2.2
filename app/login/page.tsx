@@ -27,7 +27,7 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="anim-pop mx-auto mb-4 h-16 w-16 -rotate-6 rounded-2xl bg-gold flex items-center justify-center text-primary-dark">
+          <div className="mx-auto mb-4 h-16 w-16 rounded-2xl bg-gold flex items-center justify-center text-primary-dark">
             <Icon name="cross" size={28} strokeWidth={2.4} />
           </div>
           <h1 className="text-2xl font-extrabold text-ink">خدمة إعدادي</h1>

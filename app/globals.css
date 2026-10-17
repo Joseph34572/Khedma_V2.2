@@ -69,16 +69,25 @@ body {
 .delay-5 { animation-delay: 0.46s; } .delay-6 { animation-delay: 0.54s; }
 .delay-7 { animation-delay: 0.66s; } .delay-8 { animation-delay: 0.78s; }
 
-/* دخول كل صفحة: العناصر اللي جوه الصفحة بتنطّ واحدة ورا التانية. AppShell بيلف
-   محتوى الصفحة في .page-enter بمفتاح = المسار، فالحركة بتتعاد مع كل تنقّل. */
-.page-enter > * > * { animation: pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
-.page-enter > * > *:nth-child(1) { animation-delay: 0.04s; }
-.page-enter > * > *:nth-child(2) { animation-delay: 0.1s; }
-.page-enter > * > *:nth-child(3) { animation-delay: 0.16s; }
-.page-enter > * > *:nth-child(4) { animation-delay: 0.22s; }
-.page-enter > * > *:nth-child(5) { animation-delay: 0.28s; }
-.page-enter > * > *:nth-child(6) { animation-delay: 0.34s; }
-.page-enter > * > *:nth-child(n + 7) { animation-delay: 0.4s; }
+/* دخول كل صفحة: الكروت والعناصر بتظهر بانسياب ناعم (fade + طلعة بسيطة لفوق)
+   واحدة ورا التانية — من غير نطّة. AppShell بيلف محتوى الصفحة في .page-enter
+   بمفتاح = المسار، فالحركة بتتعاد مع كل تنقّل. العناوين (h1/h2) والبلوك اللي
+   فيه عنوان الصفحة ثابتين ومش بيتحركوا. */
+@keyframes flow-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter > * > * { animation: flow-in 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+.page-enter > * > *:nth-child(1) { animation-delay: 0.03s; }
+.page-enter > * > *:nth-child(2) { animation-delay: 0.09s; }
+.page-enter > * > *:nth-child(3) { animation-delay: 0.15s; }
+.page-enter > * > *:nth-child(4) { animation-delay: 0.21s; }
+.page-enter > * > *:nth-child(5) { animation-delay: 0.27s; }
+.page-enter > * > *:nth-child(6) { animation-delay: 0.33s; }
+.page-enter > * > *:nth-child(7) { animation-delay: 0.39s; }
+.page-enter > * > *:nth-child(n + 8) { animation-delay: 0.45s; }
+.page-enter > * > :is(h1, h2, header),
+.page-enter > * > :has(> h1, > h2) { animation: none; }
 
 /* الكروت: ظل سفلي "ثلاثي الأبعاد"؛ والكروت اللي هي روابط بتكبر وتميل شوية مع الهوفر. */
 main .rounded-card { box-shadow: 0 5px 0 #ECDFC8; }

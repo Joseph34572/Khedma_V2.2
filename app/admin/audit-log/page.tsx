@@ -34,6 +34,11 @@ const ACTION_LABELS: Record<string, string> = {
   start_reading: "بدء قراءة إصحاح",
   finish_reading: "إنهاء قراءة إصحاح",
   update_prayer_content: "تعديل نص صلاة",
+  update_prayer_section: "تعديل جزء من صلاة",
+  add_prayer_section: "إضافة جزء لصلاة",
+  delete_prayer_section: "حذف جزء من صلاة",
+  activate_prayer: "تفعيل صلاة",
+  deactivate_prayer: "إلغاء تفعيل صلاة",
   import_bible_chapter: "استيراد إصحاح",
   create_quiz: "إنشاء مسابقة",
   delete_quiz: "حذف مسابقة",
@@ -57,6 +62,8 @@ const SENSITIVE_ACTIONS = new Set([
   "delete_mass",
   "delete_sunday_school_session",
   "delete_quiz",
+  "delete_prayer_section",
+  "deactivate_prayer",
   "login_failed",
   "login_blocked",
   "login_disabled"
@@ -75,7 +82,7 @@ const CATEGORIES: { key: string; label: string; actions: string[] }[] = [
     label: "الحضور",
     actions: ["create_mass", "delete_mass", "create_sunday_school_session", "delete_sunday_school_session", "record_mass_attendance", "record_sunday_school_attendance", "scan_attendance", "scan_attendance_failed", "self_report_mass"]
   },
-  { key: "spiritual", label: "الصلاة والقراءة", actions: ["start_prayer", "finish_prayer", "start_reading", "finish_reading", "update_prayer_content", "import_bible_chapter"] },
+  { key: "spiritual", label: "الصلاة والقراءة", actions: ["start_prayer", "finish_prayer", "start_reading", "finish_reading", "update_prayer_content", "update_prayer_section", "add_prayer_section", "delete_prayer_section", "activate_prayer", "deactivate_prayer", "import_bible_chapter"] },
   { key: "quizzes", label: "المسابقات", actions: ["create_quiz", "delete_quiz", "start_quiz_attempt", "submit_quiz_attempt", "submit_quiz_file", "grade_attempt"] },
   { key: "other", label: "الندوة والإشعارات", actions: ["submit_question", "add_question_note", "change_question_status", "assign_question", "send_notification", "read_notification"] }
 ];

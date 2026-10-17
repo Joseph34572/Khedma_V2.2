@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/Icon";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -25,17 +26,17 @@ function DateCell({ value, warnAfterDays = 3 }: { value: string | null; warnAfte
     return <StatusBadge tone="muted">— لم يسجل</StatusBadge>;
   }
   if (days !== null && days === 0) {
-    return <StatusBadge tone="good">✅ اليوم</StatusBadge>;
+    return <StatusBadge tone="good">اليوم</StatusBadge>;
   }
   if (days !== null && days >= warnAfterDays) {
-    return <StatusBadge tone="bad">🔴 {relativeArabicDate(value)}</StatusBadge>;
+    return <StatusBadge tone="bad">{relativeArabicDate(value)}</StatusBadge>;
   }
-  return <StatusBadge tone="warn">🟡 {relativeArabicDate(value)}</StatusBadge>;
+  return <StatusBadge tone="warn">{relativeArabicDate(value)}</StatusBadge>;
 }
 
 function TodayStatusCell({ status }: { status: "completed" | "partial" | "none" }) {
-  if (status === "completed") return <StatusBadge tone="good">✅ مكتمل</StatusBadge>;
-  if (status === "partial") return <StatusBadge tone="warn">🟡 لم يكتمل بعد</StatusBadge>;
+  if (status === "completed") return <StatusBadge tone="good">مكتمل</StatusBadge>;
+  if (status === "partial") return <StatusBadge tone="warn">لم يكتمل بعد</StatusBadge>;
   return <StatusBadge tone="muted">— لم يسجل</StatusBadge>;
 }
 
@@ -128,14 +129,14 @@ export function ChildrenTable({
         />
         <select value={prayerFilter} onChange={(e) => setPrayerFilter(e.target.value as typeof prayerFilter)} className={selectCls}>
           <option value="all">كل حالات الصلاة اليوم</option>
-          <option value="completed">✅ صلّوا اليوم</option>
-          <option value="partial">🟡 لم يكملوا بعد</option>
+          <option value="completed">صلّوا اليوم</option>
+          <option value="partial">لم يكملوا بعد</option>
           <option value="none">— لم يسجلوا</option>
         </select>
         <select value={readingFilter} onChange={(e) => setReadingFilter(e.target.value as typeof readingFilter)} className={selectCls}>
           <option value="all">كل حالات القراءة اليوم</option>
-          <option value="completed">✅ قرأوا اليوم</option>
-          <option value="partial">🟡 لم يكملوا بعد</option>
+          <option value="completed">قرأوا اليوم</option>
+          <option value="partial">لم يكملوا بعد</option>
           <option value="none">— لم يسجلوا</option>
         </select>
         <select value={activityFilter} onChange={(e) => setActivityFilter(e.target.value as ActivityFilter)} className={selectCls}>

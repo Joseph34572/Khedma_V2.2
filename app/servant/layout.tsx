@@ -4,15 +4,15 @@ import { AppShell, type NavItem } from "@/components/AppShell";
 import { ROLE_LABELS, isStaffRole, homePathForRole } from "@/lib/roles";
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/servant", label: "الرئيسية", icon: "🏠" },
-  { href: "/servant/children", label: "أولادي", icon: "👥" },
-  { href: "/servant/attendance", label: "تسجيل حضور", icon: "📋" },
-  { href: "/servant/prayer", label: "الصلاة", icon: "🕊️" },
-  { href: "/servant/bible", label: "الكتاب المقدس", icon: "📖" },
-  { href: "/servant/quizzes", label: "المسابقات", icon: "🏆" },
-  { href: "/servant/symposium", label: "صندوق الندوة", icon: "💬" },
-  { href: "/servant/notifications", label: "الإشعارات", icon: "🔔" },
-  { href: "/servant/qr", label: "حسابي", icon: "🪪" }
+  { href: "/servant", label: "الرئيسية", icon: "home" },
+  { href: "/servant/children", label: "أولادي", icon: "users" },
+  { href: "/servant/attendance", label: "تسجيل حضور", icon: "clipboard" },
+  { href: "/servant/prayer", label: "الصلاة", icon: "cross" },
+  { href: "/servant/bible", label: "الكتاب المقدس", icon: "book" },
+  { href: "/servant/quizzes", label: "المسابقات", icon: "trophy" },
+  { href: "/servant/symposium", label: "صندوق الندوة", icon: "chat" },
+  { href: "/servant/notifications", label: "الإشعارات", icon: "bell" },
+  { href: "/servant/qr", label: "حسابي", icon: "idcard" }
 ];
 
 export default async function ServantLayout({ children }: { children: React.ReactNode }) {

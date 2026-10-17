@@ -1,3 +1,4 @@
+import { Icon } from "@/components/ui/Icon";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { canManageContent } from "@/lib/roles";
@@ -22,7 +23,7 @@ export default async function BibleBooksPage() {
         <h1 className="text-xl font-extrabold text-ink">الكتاب المقدس</h1>
         {role && canManageContent(role) && (
           <Link href="/servant/content/bible" className="text-sm font-bold text-primary hover:underline">
-            ⚙️ استيراد إصحاحات
+            <span className="inline-flex items-center gap-1.5"><Icon name="settings" size={15} />استيراد إصحاحات</span>
           </Link>
         )}
       </div>

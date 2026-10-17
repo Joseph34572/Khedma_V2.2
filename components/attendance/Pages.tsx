@@ -1,3 +1,4 @@
+import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
@@ -20,8 +21,8 @@ export function AttendanceHub({ basePath }: { basePath: string }) {
     <div className="max-w-xl">
       <h1 className="text-xl font-extrabold text-ink mb-5">الحضور</h1>
       <div className="space-y-3">
-        <Link href={`${basePath}/mass`} className={cls}>⛪ حضور القداس</Link>
-        <Link href={`${basePath}/sunday-school`} className={cls}>📚 حضور مدارس الأحد</Link>
+        <Link href={`${basePath}/mass`} className={cls}><span className="inline-flex items-center gap-1.5"><Icon name="church" size={18} />حضور القداس</span></Link>
+        <Link href={`${basePath}/sunday-school`} className={cls}><span className="inline-flex items-center gap-1.5"><Icon name="books" size={18} />حضور مدارس الأحد</span></Link>
       </div>
     </div>
   );
@@ -62,7 +63,7 @@ export async function MassDetailPage({ massId, basePath }: { massId: string; bas
         <h1 className="text-xl font-extrabold text-ink">{mass.title_ar} — {relativeArabicDate(mass.mass_date)}</h1>
         <DeleteSheetButton kind="mass" id={massId} redirectTo={`${basePath}/mass`} />
       </div>
-      <Link href={`${basePath}/mass/${massId}/scan`} className="inline-block mb-4 rounded-lg bg-gold text-white px-4 py-2 font-bold">📷 مسح رموز QR</Link>
+      <Link href={`${basePath}/mass/${massId}/scan`} className="inline-block mb-4 rounded-lg bg-gold text-ink px-4 py-2 font-bold"><span className="inline-flex items-center gap-1.5"><Icon name="camera" size={18} />مسح رموز QR</span></Link>
       <AttendanceRoster kind="mass" entityId={massId} kids={kids ?? []} alreadyMarkedIds={(marked ?? []).map((m) => m.user_id)} />
     </div>
   );
@@ -108,7 +109,7 @@ export async function SundaySchoolDetailPage({ sessionId, basePath }: { sessionI
         <h1 className="text-xl font-extrabold text-ink">مدارس الأحد — {STAGE_LABELS[session.stage_id]} — {relativeArabicDate(session.session_date)}</h1>
         <DeleteSheetButton kind="sunday_school" id={sessionId} redirectTo={`${basePath}/sunday-school`} />
       </div>
-      <Link href={`${basePath}/sunday-school/${sessionId}/scan`} className="inline-block mb-4 rounded-lg bg-gold text-white px-4 py-2 font-bold">📷 مسح رموز QR</Link>
+      <Link href={`${basePath}/sunday-school/${sessionId}/scan`} className="inline-block mb-4 rounded-lg bg-gold text-ink px-4 py-2 font-bold"><span className="inline-flex items-center gap-1.5"><Icon name="camera" size={18} />مسح رموز QR</span></Link>
       <AttendanceRoster kind="sunday_school" entityId={sessionId} kids={kids ?? []} alreadyMarkedIds={(marked ?? []).map((m) => m.user_id)} />
     </div>
   );

@@ -4,8 +4,9 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOutAction } from "@/app/actions";
+import { Icon, type IconName } from "@/components/ui/Icon";
 
-export type NavItem = { href: string; label: string; icon: string };
+export type NavItem = { href: string; label: string; icon: IconName };
 
 const ROOTS = ["/admin", "/servant", "/child"];
 
@@ -13,34 +14,6 @@ const ROOTS = ["/admin", "/servant", "/child"];
 // الزرار النشط بتتحسب منه، فلازم يفضل ثابت ومطابق لـ w-[76px] تحت.
 const TAB_WIDTH = 76;
 const PILL_WIDTH = 62;
-
-// الـ layouts بتبعت أيقونة كـ emoji (نفس القيم القديمة)؛ هنا بنحوّلها لأيقونة SVG
-// خطّية موحّدة عشان الشكل يبقى متناسق على كل الأجهزة. لو جه emoji مش في القايمة
-// بيتعرض زي ما هو.
-const ICON_PATHS: Record<string, string> = {
-  "🏠": "M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
-  "👥": "M9 4.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 1 1 0-7zM2.5 20c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5M16 4.5a3.5 3.5 0 0 1 0 7M18 15c2 .6 3.2 2.2 3.5 5",
-  "📋": "M9 3.5h6v3H9zM7 5H5.5A1.5 1.5 0 0 0 4 6.5v13A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 18.5 5H17M8.5 13l2.5 2.5 4.5-5",
-  "🕊": "M12 3v18M6.5 8.5h11",
-  "📖": "M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2zM4 20a2 2 0 0 0 2 1h13v-3",
-  "🏆": "M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 21h7M10 17h4v4",
-  "💬": "M4 5h16v11H9l-5 4z",
-  "🔔": "M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0",
-  "🪪": "M3 6h18v12H3zM8.5 9.5a2 2 0 1 1 0 4a2 2 0 1 1 0-4zM13 10h5M13 14h4",
-  "👤": "M12 4a4 4 0 1 1 0 8a4 4 0 1 1 0-8zM4 21c1.5-4 4.5-6 8-6s6.5 2 8 6",
-  "🧒": "M12 5a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM6 21c.8-3.5 3.2-5.5 6-5.5s5.2 2 6 5.5",
-  "🗂": "M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"
-};
-
-function NavIcon({ icon, size = 22 }: { icon: string; size?: number }) {
-  const d = ICON_PATHS[icon.replace(/️/g, "")];
-  if (!d) return <span aria-hidden>{icon}</span>;
-  return (
-    <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d={d} />
-    </svg>
-  );
-}
 
 export function AppShell({
   navItems,
@@ -74,7 +47,7 @@ export function AppShell({
       <aside className="hidden lg:flex lg:w-64 lg:flex-col border-l border-line bg-white p-4">
         <div className="flex items-center gap-3 px-2 py-3 mb-4">
           <div className="h-10 w-10 -rotate-6 rounded-xl bg-gold flex items-center justify-center text-primary-dark">
-            <NavIcon icon="🕊" size={20} />
+            <Icon name="cross" size={20} />
           </div>
           <p className="font-extrabold text-ink leading-none">خدمة إعدادي</p>
         </div>
@@ -93,7 +66,7 @@ export function AppShell({
                 isActive(item.href) ? "bg-primary text-white" : "text-ink-soft hover:bg-parchment"
               }`}
             >
-              <NavIcon icon={item.icon} size={20} />
+              <Icon name={item.icon} size={20} />
               {item.label}
             </Link>
           ))}
@@ -114,7 +87,7 @@ export function AppShell({
           <span aria-hidden className="anim-float absolute top-24 left-5 h-3.5 w-3.5 rounded-full bg-gold opacity-35 [animation-delay:1.6s]" />
           <div className="relative flex items-center gap-3">
             <div className="h-12 w-12 flex-none -rotate-6 rounded-2xl bg-gold flex items-center justify-center text-primary-dark lg:hidden">
-              <NavIcon icon="🕊" size={22} />
+              <Icon name="cross" size={22} />
             </div>
             <div className="min-w-0">
               <p className="text-[13px] font-medium text-gold-light">{roleLabel}</p>
@@ -164,7 +137,7 @@ export function AppShell({
                     active ? "text-primary font-extrabold" : "text-ink-soft font-medium"
                   }`}
                 >
-                  <NavIcon icon={item.icon} />
+                  <Icon name={item.icon} size={22} />
                   <span className="whitespace-nowrap">{item.label}</span>
                 </Link>
               );

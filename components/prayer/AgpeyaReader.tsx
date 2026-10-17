@@ -35,6 +35,8 @@ export function AgpeyaReader({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fontIdx, setFontIdx] = useState(1);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
   const stateRef = useRef({ sessionId, activeSeconds, done, reading: index !== null });
   stateRef.current = { sessionId, activeSeconds, done, reading: index !== null };
@@ -91,6 +93,28 @@ export function AgpeyaReader({
     setDirection("next");
     setIndex(i);
     window.scrollTo({ top: 0 });
+  }
+
+  // قفل القايمة المنسدلة لو داس برّه منها.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDown(e: MouseEvent | TouchEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [menuOpen]);
+
+  function jump(i: number) {
+    setMenuOpen(false);
+    if (index === null || i === index) return;
+    setDirection(i > index ? "next" : "prev");
+    setIndex(i);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function go(delta: 1 | -1) {
@@ -203,26 +227,49 @@ export function AgpeyaReader({
 
   return (
     <div className="max-w-2xl mx-auto" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <button type="button" onClick={() => setIndex(null)} className="inline-flex items-center gap-1.5 text-sm font-bold text-primary">
-          <Icon name="clipboard" size={16} />
-          الأجزاء
-        </button>
-        <span className="text-xs text-ink-soft">
-          {title} · {(index + 1).toLocaleString("ar-EG")} من {sections.length.toLocaleString("ar-EG")}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <button type="button" aria-label="تصغير الخط" onClick={() => changeFont(-1)} className="h-9 w-9 rounded-full border border-line text-sm font-bold">
+      <div className="flex items-start gap-2 mb-4">
+        {/* قايمة منسدلة باسم الصلاة: بتعرض كل أجزاءها والولد بيروح لأي جزء على طول. */}
+        <div ref={menuRef} className="relative flex-1 min-w-0">
+          <button
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((o) => !o)}
+            className="w-full h-11 rounded-[14px] bg-primary text-parchment px-4 flex items-center justify-between gap-2 font-extrabold"
+          >
+            <span className="truncate">{title}</span>
+            <Icon name="chevronDown" size={18} strokeWidth={2.5} className={`transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+          </button>
+          {menuOpen && (
+            <ul
+              role="listbox"
+              aria-label={`أجزاء ${title}`}
+              className="absolute z-20 inset-x-0 mt-2 max-h-[60vh] overflow-y-auto rounded-[14px] border border-line bg-white shadow-[0_12px_30px_rgba(46,33,23,0.18)] divide-y divide-line"
+            >
+              {sections.map((s, i) => (
+                <li key={s.id} role="option" aria-selected={i === index}>
+                  <button
+                    type="button"
+                    onClick={() => jump(i)}
+                    className={`w-full text-start px-4 py-3 text-[15px] ${
+                      i === index ? "bg-[#F4E6D3] font-extrabold text-primary" : "text-ink hover:bg-parchment"
+                    }`}
+                  >
+                    {s.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <span className="inline-flex items-center gap-1 flex-none">
+          <button type="button" aria-label="تصغير الخط" onClick={() => changeFont(-1)} className="h-11 w-11 rounded-full border border-line bg-white text-sm font-bold">
             ا-
           </button>
-          <button type="button" aria-label="تكبير الخط" onClick={() => changeFont(1)} className="h-9 w-9 rounded-full border border-line text-base font-bold">
+          <button type="button" aria-label="تكبير الخط" onClick={() => changeFont(1)} className="h-11 w-11 rounded-full border border-line bg-white text-base font-bold">
             ا+
           </button>
         </span>
-      </div>
-
-      <div className="h-1.5 rounded-full bg-line mb-4 overflow-hidden" aria-hidden>
-        <div className="h-full bg-gold transition-all duration-500" style={{ width: `${((index + 1) / sections.length) * 100}%` }} />
       </div>
 
       <article

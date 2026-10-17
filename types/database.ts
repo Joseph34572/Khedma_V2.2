@@ -211,6 +211,20 @@ export interface Database {
         Update: Partial<{ title_ar: string; body_ar: string; sort_order: number; is_active: boolean }>;
         Relationships: [];
       };
+      prayer_sections: {
+        Row: {
+          id: string;
+          prayer_content_id: string;
+          sort_order: number;
+          title_ar: string;
+          body_ar: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: { prayer_content_id: string; sort_order: number; title_ar: string; body_ar?: string };
+        Update: Partial<{ sort_order: number; title_ar: string; body_ar: string }>;
+        Relationships: [];
+      };
       prayer_activity_events: {
         Row: { id: string; session_id: string; occurred_at: string; event_type: string; payload: Record<string, unknown> };
         Insert: { session_id: string; event_type: string; payload?: Record<string, unknown> };

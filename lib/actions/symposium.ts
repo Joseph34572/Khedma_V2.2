@@ -1,5 +1,6 @@
 "use server";
 
+import { audit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { QuestionStatus } from "@/types/database";
@@ -19,8 +20,21 @@ export async function submitQuestionAction(_prev: ActionState, formData: FormDat
   if (text.length < 5) return { error: "اكتب سؤالك بشكل أوضح (5 أحرف على الأقل).", success: null };
   if (text.length > 1500) return { error: "السؤال طويل جدًا (الحد الأقصى 1500 حرف).", success: null };
 
-  const { error } = await supabase.from("symposium_questions").insert({ user_id: user.id, question_text: text, is_anonymous: anonymous });
+  const { data: question, error } = await supabase
+    .from("symposium_questions")
+    .insert({ user_id: user.id, question_text: text, is_anonymous: anonymous })
+    .select("id")
+    .single();
   if (error) return { error: "تعذّر إرسال السؤال. حاول مرة أخرى.", success: null };
+
+  // السؤال المجهول بيتسجّل من غير صاحبه، عشان السجل نفسه ميكشفش هويته.
+  await audit({
+    actorId: anonymous ? null : user.id,
+    action: "submit_question",
+    entityType: "symposium_question",
+    entityId: question?.id,
+    details: { anonymous }
+  });
 
   revalidatePath("/child/symposium");
   return { error: null, success: "تم إرسال سؤالك بنجاح." };
@@ -58,6 +72,7 @@ export async function addQuestionNoteAction(questionId: string, note: string): P
   if (clean.length > 1500) return { error: "الملاحظة طويلة جدًا" };
   const { error } = await supabase.from("symposium_question_notes").insert({ question_id: questionId, author_id: user.id, note: clean });
   if (error) return { error: "تعذّر حفظ الملاحظة" };
+  await audit({ actorId: user.id, action: "add_question_note", entityType: "symposium_question", entityId: questionId });
   revalidatePath("/servant/symposium");
   revalidatePath("/admin/symposium");
   return {};

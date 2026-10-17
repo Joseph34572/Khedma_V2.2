@@ -1,5 +1,6 @@
 "use server";
 
+import { audit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canManageContent, type AppRole } from "@/lib/roles";
@@ -17,12 +18,12 @@ async function requireContentManager() {
   if (!profile || !canManageContent(profile.role as AppRole)) {
     throw new Error("هذه العملية غير متاحة لدورك الحالي.");
   }
-  return supabase;
+  return { supabase, userId: user.id };
 }
 
 export async function updatePrayerContentAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   try {
-    const supabase = await requireContentManager();
+    const { supabase, userId } = await requireContentManager();
     const id = String(formData.get("id") ?? "");
     const bodyAr = String(formData.get("body_ar") ?? "").trim();
     const isActive = formData.get("is_active") === "on";
@@ -33,6 +34,7 @@ export async function updatePrayerContentAction(_prev: ActionState, formData: Fo
 
     const { error } = await supabase.from("prayer_contents").update({ body_ar: bodyAr, is_active: isActive }).eq("id", id);
     if (error) return { error: "تعذّر حفظ التعديلات.", success: null };
+    await audit({ actorId: userId, action: "update_prayer_content", entityType: "prayer_content", entityId: id, details: { is_active: isActive, length: bodyAr.length } });
 
     revalidatePath("/admin/content/prayer");
     revalidatePath("/servant/content/prayer");

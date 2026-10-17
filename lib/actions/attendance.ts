@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { canViewAllStages, type AppRole, type Stage } from "@/lib/roles";
-import { logAuditEvent } from "@/lib/audit";
+import { logAuditEvent, audit } from "@/lib/audit";
 
 export type ActionState = { error: string | null; success: string | null };
 
@@ -49,15 +49,21 @@ export async function createSundaySchoolSessionAction(_prev: ActionState, formDa
 
   if (!stageId || !sessionDate) return { error: "أكمل كل الحقول المطلوبة.", success: null };
 
-  const { error } = await supabase.from("sunday_school_sessions").insert({
-    stage_id: stageId as Stage,
-    session_date: sessionDate,
-    starts_at: startsAt,
-    ends_at: endsAt,
-    created_by: user.id
-  });
+  const { data: session, error } = await supabase
+    .from("sunday_school_sessions")
+    .insert({
+      stage_id: stageId as Stage,
+      session_date: sessionDate,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      created_by: user.id
+    })
+    .select("id")
+    .single();
 
   if (error) return { error: "تعذّر إنشاء الجلسة. تأكد أن لديك صلاحية على هذه المرحلة.", success: null };
+
+  await audit({ actorId: user.id, action: "create_sunday_school_session", entityType: "sunday_school_session", entityId: session?.id, details: { stage_id: stageId, session_date: sessionDate } });
 
   revalidatePath("/admin/attendance/sunday-school");
   revalidatePath("/servant/attendance/sunday-school");
@@ -76,6 +82,7 @@ export async function recordMassAttendanceAction(massId: string, userIds: string
   const { error, count } = await supabase.from("mass_attendance").upsert(rows, { onConflict: "mass_id,user_id", ignoreDuplicates: true, count: "exact" });
 
   if (error) return { error: "تعذّر حفظ الحضور." };
+  await audit({ actorId: user.id, action: "record_mass_attendance", entityType: "mass", entityId: massId, details: { children: userIds.length, user_ids: userIds } });
   revalidatePath("/admin/children");
   revalidatePath("/servant");
   return { ok: true, failed: userIds.length - (count ?? userIds.length) };
@@ -93,6 +100,7 @@ export async function recordSundaySchoolAttendanceAction(sessionId: string, user
   const { error } = await supabase.from("sunday_school_attendance").upsert(rows, { onConflict: "session_id,user_id", ignoreDuplicates: true });
 
   if (error) return { error: "تعذّر حفظ الحضور." };
+  await audit({ actorId: user.id, action: "record_sunday_school_attendance", entityType: "sunday_school_session", entityId: sessionId, details: { children: userIds.length, user_ids: userIds } });
   revalidatePath("/admin/children");
   revalidatePath("/servant");
   return { ok: true };

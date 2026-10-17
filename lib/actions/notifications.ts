@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { logAuditEvent } from "@/lib/audit";
+import { logAuditEvent, audit } from "@/lib/audit";
 import { normalizePhone } from "@/lib/phone";
 import { canViewAllStages, type AppRole, type Stage } from "@/lib/roles";
 import { globalAudienceSegments, stageAudienceSegments, type AudienceSegment } from "@/lib/audienceSegments";
@@ -175,6 +175,7 @@ export async function markNotificationReadAction(recipientId: string): Promise<{
       .is("read_at", null);
 
     if (error) throw new ExpectedError("تعذّر تحديث حالة الإشعار.");
+    await audit({ actorId: user.id, action: "read_notification", entityType: "notification_recipient", entityId: parsed.data });
     return {};
   } catch (e) {
     return { error: safeErrorMessage(e, "markNotificationReadAction") };

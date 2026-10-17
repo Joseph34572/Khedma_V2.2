@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { AppShell, type NavItem } from "@/components/AppShell";
-import { ROLE_LABELS, isManagementRole, canManageUsers, canManageContent, homePathForRole, type AppRole } from "@/lib/roles";
+import { ROLE_LABELS, STAGE_LABELS, isManagementRole, canManageUsers, canManageContent, homePathForRole, type AppRole } from "@/lib/roles";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, user, fullName, role, status } = await getCurrentProfile();
+  const { supabase, user, fullName, role, stageId, status } = await getCurrentProfile();
   if (!user || !role) redirect("/login");
   if (status === "disabled") {
     await supabase.auth.signOut();
@@ -27,7 +27,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   ];
 
   return (
-    <AppShell navItems={navItems} userName={fullName ?? ""} roleLabel={ROLE_LABELS[role]}>
+    <AppShell
+      navItems={navItems}
+      userName={fullName ?? ""}
+      roleLabel={stageId ? `${ROLE_LABELS[role]} · ${STAGE_LABELS[stageId]}` : ROLE_LABELS[role]}
+      profileHref="/admin/account"
+    >
       {children}
     </AppShell>
   );

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { AppShell, type NavItem } from "@/components/AppShell";
-import { ROLE_LABELS, isStaffRole, homePathForRole } from "@/lib/roles";
+import { ROLE_LABELS, STAGE_LABELS, isStaffRole, homePathForRole } from "@/lib/roles";
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/servant", label: "الرئيسية", icon: "home" },
@@ -11,12 +11,11 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/servant/bible", label: "الكتاب المقدس", icon: "book" },
   { href: "/servant/quizzes", label: "المسابقات", icon: "trophy" },
   { href: "/servant/symposium", label: "صندوق الندوة", icon: "chat" },
-  { href: "/servant/notifications", label: "الإشعارات", icon: "bell" },
-  { href: "/servant/qr", label: "حسابي", icon: "idcard" }
+  { href: "/servant/notifications", label: "الإشعارات", icon: "bell" }
 ];
 
 export default async function ServantLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, user, fullName, role, status } = await getCurrentProfile();
+  const { supabase, user, fullName, role, stageId, status } = await getCurrentProfile();
   if (!user || !role) redirect("/login");
   if (status === "disabled") {
     await supabase.auth.signOut();
@@ -26,7 +25,12 @@ export default async function ServantLayout({ children }: { children: React.Reac
   if (!isStaffRole(role)) redirect(homePathForRole(role));
 
   return (
-    <AppShell navItems={NAV_ITEMS} userName={fullName ?? ""} roleLabel={ROLE_LABELS[role]}>
+    <AppShell
+      navItems={NAV_ITEMS}
+      userName={fullName ?? ""}
+      roleLabel={stageId ? `${ROLE_LABELS[role]} · ${STAGE_LABELS[stageId]}` : ROLE_LABELS[role]}
+      profileHref="/servant/qr"
+    >
       {children}
     </AppShell>
   );

@@ -2,10 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { relativeArabicDate } from "@/lib/format";
-import { Icon, type IconName } from "@/components/ui/Icon";
-
-// محيط دايرة التقدّم (نصف القطر 34) — بيتمرّر كمان لـ --ring-full عشان حركة الملء.
-const RING_CIRCUMFERENCE = 2 * Math.PI * 34;
+import { Icon } from "@/components/ui/Icon";
+import { Tile, WideTile, Done, Pending, Muted, ProgressRing } from "@/components/home/Tiles";
 
 type NotificationRow = { id: string; notifications: { title: string; sent_at: string | null } | null };
 
@@ -95,7 +93,6 @@ export default async function ChildHomePage() {
 
   const done = Number(prayedToday) + Number(readToday);
   const total = 2;
-  const ringOffset = RING_CIRCUMFERENCE * (1 - done / total);
   const ar = (n: number) => n.toLocaleString("ar-EG");
 
   const headline = done === total ? "برافو! خلّصت مهام النهارده" : done > 0 ? "قربت تخلّص!" : "يلا نبدأ اليوم";
@@ -111,27 +108,7 @@ export default async function ChildHomePage() {
   return (
     <div className="max-w-xl mx-auto grid grid-cols-2 gap-3">
       <section className="col-span-2 bg-white rounded-[24px] border-2 border-line p-4 flex items-center gap-4 shadow-[0_6px_0_#ECDFC8]">
-        <div className="relative h-[84px] w-[84px] flex-none">
-          <svg aria-hidden width="84" height="84" viewBox="0 0 84 84">
-            <circle cx="42" cy="42" r="34" fill="none" stroke="#F4E6D3" strokeWidth="10" />
-            <circle
-              className="anim-ring"
-              cx="42"
-              cy="42"
-              r="34"
-              fill="none"
-              stroke="#7A1F2B"
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeDasharray={RING_CIRCUMFERENCE}
-              transform="rotate(-90 42 42)"
-              style={{ strokeDashoffset: ringOffset, ["--ring-full" as string]: RING_CIRCUMFERENCE }}
-            />
-          </svg>
-          <span className="absolute inset-0 flex items-center justify-center text-[21px] font-extrabold text-primary">
-            {ar(done)}/{ar(total)}
-          </span>
-        </div>
+        <ProgressRing done={done} total={total} />
         <div className="min-w-0">
           <h1 className="text-[17px] font-extrabold text-ink">{headline}</h1>
           <p className="text-sm text-ink-soft leading-relaxed mt-1">{subline}</p>
@@ -182,103 +159,4 @@ export default async function ChildHomePage() {
       </Link>
     </div>
   );
-}
-
-const TILE_CLASS = "bg-white rounded-[20px] border-2 border-line p-3.5 shadow-[0_5px_0_#ECDFC8] flex flex-col gap-2";
-
-function Tile({
-  href,
-  label,
-  icon,
-  children
-}: {
-  href?: string;
-  label: string;
-  icon: IconName;
-  children: React.ReactNode;
-}) {
-  const body = (
-    <>
-      <span className="flex items-start justify-between">
-        <span className="h-[38px] w-[38px] rounded-xl bg-[#F4E6D3] flex items-center justify-center text-primary">
-          <Icon name={icon} size={18} strokeWidth={2.2} />
-        </span>
-        {href && <Icon name="chevronLeft" size={18} className="text-ink-soft mt-2" />}
-      </span>
-      <span className="text-[15px] font-bold text-ink">{label}</span>
-      {children}
-    </>
-  );
-  return href ? (
-    <Link href={href} prefetch={false} className={`playful-card ${TILE_CLASS}`}>
-      {body}
-    </Link>
-  ) : (
-    <div className={TILE_CLASS}>{body}</div>
-  );
-}
-
-function WideTile({
-  href,
-  icon,
-  chipClass,
-  title,
-  subtitle,
-  badge
-}: {
-  href: string;
-  icon: IconName;
-  chipClass: string;
-  title: string;
-  subtitle: string;
-  badge?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      prefetch={false}
-      className="playful-card col-span-2 bg-white rounded-[20px] border-2 border-line p-3.5 shadow-[0_5px_0_#ECDFC8] flex items-center gap-3"
-    >
-      <span className={`relative h-[44px] w-[44px] flex-none rounded-xl flex items-center justify-center ${chipClass}`}>
-        <Icon name={icon} size={20} strokeWidth={2.2} />
-        {badge && (
-          <span className="absolute -top-1.5 -left-1.5 min-w-[20px] h-5 px-1 rounded-full bg-gold text-ink text-[11px] font-extrabold flex items-center justify-center">
-            {badge}
-          </span>
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-extrabold text-ink">{title}</span>
-        <span className="block text-[13px] text-ink-soft truncate">{subtitle}</span>
-      </span>
-      <Icon name="chevronLeft" size={18} className="text-ink-soft" />
-    </Link>
-  );
-}
-
-// الحالة دايمًا بأيقونة + نص (مش لون بس)، زي باقي التطبيق.
-function Done({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[13px] font-bold text-good flex items-center gap-1">
-      <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-        <path className="anim-check" d="M5 12l5 5 9-10" />
-      </svg>
-      {children}
-    </span>
-  );
-}
-
-function Pending({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[13px] font-bold text-[#8A5A00] flex items-center gap-1">
-      <span className="anim-tick">
-        <Icon name="clock" size={14} strokeWidth={2.5} />
-      </span>
-      {children}
-    </span>
-  );
-}
-
-function Muted({ children }: { children: React.ReactNode }) {
-  return <span className="text-[13px] text-ink-soft">{children}</span>;
 }

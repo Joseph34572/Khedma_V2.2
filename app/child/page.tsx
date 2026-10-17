@@ -2,57 +2,96 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { relativeArabicDate } from "@/lib/format";
+import { Icon, type IconName } from "@/components/ui/Icon";
 
-// محيط دايرة التقدّم (نصف القطر 34) — لازم يطابق --ring-full في الـ style تحت.
+// محيط دايرة التقدّم (نصف القطر 34) — بيتمرّر كمان لـ --ring-full عشان حركة الملء.
 const RING_CIRCUMFERENCE = 2 * Math.PI * 34;
+
+type NotificationRow = { id: string; notifications: { title: string; sent_at: string | null } | null };
 
 export default async function ChildHomePage() {
   const { supabase, user } = await getCurrentProfile();
   if (!user) redirect("/login");
 
-  const [{ data: lastPrayer }, { data: lastReading }, { data: lastMass }, { data: lastConfession }, { data: lastSunday }] =
-    await Promise.all([
-      supabase
-        .from("prayer_sessions")
-        .select("started_at, completion_level")
-        .eq("user_id", user.id)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("bible_reading_sessions")
-        .select("started_at, completion_level")
-        .eq("user_id", user.id)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("mass_attendance")
-        .select("created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("confessions")
-        .select("confessed_at")
-        .eq("user_id", user.id)
-        .order("confessed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("sunday_school_attendance")
-        .select("recorded_at")
-        .eq("user_id", user.id)
-        .order("recorded_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    ]);
+  const nowIso = new Date().toISOString();
+
+  const [
+    { data: lastPrayer },
+    { data: lastReading },
+    { data: lastConfession },
+    { data: lastSunday },
+    { data: openQuizzes },
+    { data: myAttempts },
+    { data: unread }
+  ] = await Promise.all([
+    supabase
+      .from("prayer_sessions")
+      .select("started_at, completion_level")
+      .eq("user_id", user.id)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("bible_reading_sessions")
+      .select("started_at, completion_level")
+      .eq("user_id", user.id)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("confessions")
+      .select("confessed_at")
+      .eq("user_id", user.id)
+      .order("confessed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("sunday_school_attendance")
+      .select("recorded_at, sunday_school_sessions(session_date)")
+      .eq("user_id", user.id)
+      .order("recorded_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    // المسابقات المفتوحة دلوقتي (RLS بيقصرها على مرحلة الولد).
+    supabase
+      .from("quizzes")
+      .select("id, title_ar, ends_at, max_attempts")
+      .lte("starts_at", nowIso)
+      .gte("ends_at", nowIso)
+      .order("ends_at", { ascending: true }),
+    supabase.from("quiz_attempts").select("quiz_id, submitted_at").eq("user_id", user.id),
+    // الإشعارات اللي لسه متقرتش — أول ما الولد يقرأها الكارت بيختفي.
+    supabase
+      .from("notification_recipients")
+      .select("id, notifications(title, sent_at)")
+      .eq("user_id", user.id)
+      .is("read_at", null)
+      .limit(50)
+  ]);
 
   const today = new Date().toDateString();
   const isToday = (value: string | undefined) => !!value && new Date(value).toDateString() === today;
   const prayedToday = isToday(lastPrayer?.started_at) && lastPrayer?.completion_level === "likely_complete";
   const readToday = isToday(lastReading?.started_at) && lastReading?.completion_level === "likely_complete";
+
+  // تاريخ حصة مدارس الأحد نفسها لو متاح؛ الولد مالوش صلاحية قراءة جدول الحصص (RLS)،
+  // فوقتها بنرجع لوقت تسجيل الحضور.
+  const sundaySession = lastSunday?.sunday_school_sessions as unknown as { session_date: string } | null | undefined;
+  const lastSundayDate = sundaySession?.session_date ?? lastSunday?.recorded_at ?? null;
+
+  // مسابقة تظهر بس لو مفتوحة الآن والولد لسه عنده محاولات.
+  const submittedByQuiz = new Map<string, number>();
+  for (const a of myAttempts ?? []) {
+    if (a.submitted_at) submittedByQuiz.set(a.quiz_id, (submittedByQuiz.get(a.quiz_id) ?? 0) + 1);
+  }
+  const availableQuizzes = (openQuizzes ?? []).filter((q) => (submittedByQuiz.get(q.id) ?? 0) < (q.max_attempts ?? 1));
+
+  const firstQuiz = availableQuizzes[0];
+
+  const unreadItems = ((unread ?? []) as unknown as NotificationRow[]).filter((r) => r.notifications);
+  const latestUnread = unreadItems.sort((a, b) =>
+    (b.notifications?.sent_at ?? "").localeCompare(a.notifications?.sent_at ?? "")
+  )[0];
 
   const done = Number(prayedToday) + Number(readToday);
   const total = 2;
@@ -66,11 +105,11 @@ export default async function ChildHomePage() {
       : !prayedToday && !readToday
         ? "صلاة النهارده وقراية الإصحاح مستنيينك"
         : !prayedToday
-          ? "فاضلك صلاة النهارده وتكمّل مهامك"
-          : "فاضلك قراءة الإصحاح وتكمّل مهامك";
+          ? "فاضلك صلاة النهارده"
+          : "فاضلك قراءة الإصحاح";
 
   return (
-    <div className="max-w-xl grid grid-cols-2 gap-3">
+    <div className="max-w-xl mx-auto grid grid-cols-2 gap-3">
       <section className="col-span-2 bg-white rounded-[24px] border-2 border-line p-4 flex items-center gap-4 shadow-[0_6px_0_#ECDFC8]">
         <div className="relative h-[84px] w-[84px] flex-none">
           <svg aria-hidden width="84" height="84" viewBox="0 0 84 84">
@@ -99,65 +138,121 @@ export default async function ChildHomePage() {
         </div>
       </section>
 
-      <StatusCard label="الصلاة" icon={<CrossIcon />}>
+      <Tile href="/child/prayer" label="الصلاة" icon="cross">
         {prayedToday ? <Done>مكتملة النهارده</Done> : <Pending>لم تكتمل بعد</Pending>}
-      </StatusCard>
-      <StatusCard label="الكتاب المقدس" icon={<BookIcon />}>
+      </Tile>
+      <Tile href="/child/bible" label="الكتاب المقدس" icon="book">
         {readToday ? <Done>قريت النهارده</Done> : <Pending>لم يكتمل بعد</Pending>}
-      </StatusCard>
-      <StatusCard label="القداس" icon={<CalendarIcon />}>
-        <span className="text-[13px] text-ink-soft">
-          {lastMass ? `آخر حضور: ${relativeArabicDate(lastMass.created_at)}` : "لم يتم التسجيل"}
-        </span>
-      </StatusCard>
-      <StatusCard label="مدارس الأحد" icon={<UsersIcon />}>
-        <span className="text-[13px] text-ink-soft">
-          {lastSunday ? `آخر حضور: ${relativeArabicDate(lastSunday.recorded_at)}` : "لم يسجّل بعد"}
-        </span>
-      </StatusCard>
-      <StatusCard label="الاعتراف" icon={<HeartIcon />} wide>
-        <span className="text-[13px] text-ink-soft">{relativeArabicDate(lastConfession?.confessed_at ?? null)}</span>
-      </StatusCard>
+      </Tile>
+      <Tile href="/child/mass" label="مدارس الأحد" icon="users">
+        <Muted>{lastSundayDate ? `آخر حضور: ${relativeArabicDate(lastSundayDate)}` : "لم يسجّل بعد"}</Muted>
+      </Tile>
+      <Tile label="الاعتراف" icon="heart">
+        <Muted>{lastConfession ? `آخر اعتراف: ${relativeArabicDate(lastConfession.confessed_at)}` : "لم يسجّل بعد"}</Muted>
+      </Tile>
+
+      {firstQuiz && (
+        <WideTile
+          href={availableQuizzes.length === 1 ? `/child/quizzes/${firstQuiz.id}` : "/child/quizzes"}
+          icon="trophy"
+          chipClass="bg-gold text-primary-dark"
+          title={availableQuizzes.length === 1 ? "مسابقة مستنياك!" : `${ar(availableQuizzes.length)} مسابقات مستنياك!`}
+          subtitle={`${firstQuiz.title_ar} · تنتهي ${relativeArabicDate(firstQuiz.ends_at)}`}
+        />
+      )}
+
+      {latestUnread && (
+        <WideTile
+          href="/child/notifications"
+          icon="bell"
+          chipClass="bg-primary text-parchment"
+          title={unreadItems.length === 1 ? "إشعار جديد" : `${ar(unreadItems.length)} إشعارات جديدة`}
+          subtitle={latestUnread.notifications?.title ?? ""}
+          badge={ar(unreadItems.length)}
+        />
+      )}
 
       <Link
-        href="/child/prayer"
+        href="/child/symposium"
         prefetch={false}
-        className="h-[54px] rounded-[18px] bg-primary text-parchment text-base font-extrabold flex items-center justify-center mt-1.5"
+        className="col-span-2 h-[56px] rounded-[18px] bg-primary text-parchment text-base font-extrabold flex items-center justify-center gap-2 mt-1.5"
       >
-        ابدأ الصلاة
-      </Link>
-      <Link
-        href="/child/bible"
-        prefetch={false}
-        className="h-[54px] rounded-[18px] bg-gold text-ink text-base font-extrabold flex items-center justify-center mt-1.5"
-      >
-        اقرأ الإصحاح
+        <Icon name="chat" size={20} />
+        اسأل سؤال في صندوق الندوة
       </Link>
     </div>
   );
 }
 
-function StatusCard({
+const TILE_CLASS = "bg-white rounded-[20px] border-2 border-line p-3.5 shadow-[0_5px_0_#ECDFC8] flex flex-col gap-2";
+
+function Tile({
+  href,
   label,
   icon,
-  wide = false,
   children
 }: {
+  href?: string;
   label: string;
-  icon: React.ReactNode;
-  wide?: boolean;
+  icon: IconName;
   children: React.ReactNode;
 }) {
-  return (
-    <div
-      className={`playful-card bg-white rounded-[20px] border-2 border-line p-3.5 shadow-[0_5px_0_#ECDFC8] ${
-        wide ? "col-span-2 flex items-center gap-3" : "flex flex-col gap-2"
-      }`}
-    >
-      <span className="h-[38px] w-[38px] flex-none rounded-xl bg-[#F4E6D3] flex items-center justify-center text-primary">{icon}</span>
-      <span className={`text-[15px] font-bold text-ink ${wide ? "flex-1" : ""}`}>{label}</span>
+  const body = (
+    <>
+      <span className="flex items-start justify-between">
+        <span className="h-[38px] w-[38px] rounded-xl bg-[#F4E6D3] flex items-center justify-center text-primary">
+          <Icon name={icon} size={18} strokeWidth={2.2} />
+        </span>
+        {href && <Icon name="chevronLeft" size={18} className="text-ink-soft mt-2" />}
+      </span>
+      <span className="text-[15px] font-bold text-ink">{label}</span>
       {children}
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} prefetch={false} className={`playful-card ${TILE_CLASS}`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={TILE_CLASS}>{body}</div>
+  );
+}
+
+function WideTile({
+  href,
+  icon,
+  chipClass,
+  title,
+  subtitle,
+  badge
+}: {
+  href: string;
+  icon: IconName;
+  chipClass: string;
+  title: string;
+  subtitle: string;
+  badge?: string;
+}) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      className="playful-card col-span-2 bg-white rounded-[20px] border-2 border-line p-3.5 shadow-[0_5px_0_#ECDFC8] flex items-center gap-3"
+    >
+      <span className={`relative h-[44px] w-[44px] flex-none rounded-xl flex items-center justify-center ${chipClass}`}>
+        <Icon name={icon} size={20} strokeWidth={2.2} />
+        {badge && (
+          <span className="absolute -top-1.5 -left-1.5 min-w-[20px] h-5 px-1 rounded-full bg-gold text-ink text-[11px] font-extrabold flex items-center justify-center">
+            {badge}
+          </span>
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-extrabold text-ink">{title}</span>
+        <span className="block text-[13px] text-ink-soft truncate">{subtitle}</span>
+      </span>
+      <Icon name="chevronLeft" size={18} className="text-ink-soft" />
+    </Link>
   );
 }
 
@@ -177,30 +272,13 @@ function Pending({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[13px] font-bold text-[#8A5A00] flex items-center gap-1">
       <span className="anim-tick">
-        <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
+        <Icon name="clock" size={14} strokeWidth={2.5} />
       </span>
       {children}
     </span>
   );
 }
 
-function Svg({ children }: { children: React.ReactNode }) {
-  return (
-    <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      {children}
-    </svg>
-  );
+function Muted({ children }: { children: React.ReactNode }) {
+  return <span className="text-[13px] text-ink-soft">{children}</span>;
 }
-const CrossIcon = () => <Svg><path d="M12 3v18M6.5 8.5h11" /></Svg>;
-const BookIcon = () => <Svg><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 1h13v-3" /></Svg>;
-const CalendarIcon = () => <Svg><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></Svg>;
-const UsersIcon = () => (
-  <Svg>
-    <circle cx="9" cy="8" r="3.5" />
-    <path d="M2.5 20c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5M16 4.5a3.5 3.5 0 0 1 0 7M18 15c2 .6 3.2 2.2 3.5 5" />
-  </Svg>
-);
-const HeartIcon = () => <Svg><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" /></Svg>;

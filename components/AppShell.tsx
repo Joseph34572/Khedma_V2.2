@@ -19,12 +19,15 @@ export function AppShell({
   navItems,
   userName,
   roleLabel,
+  profileHref,
   children
 }: {
   navItems: NavItem[];
   activeHref?: string;
   userName: string;
   roleLabel: string;
+  /** لو موجود، اسم المستخدم في الهيدر بيبقى رابط لصفحة ملفه الشخصي. */
+  profileHref?: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -89,12 +92,26 @@ export function AppShell({
             <div className="h-12 w-12 flex-none rounded-2xl bg-gold flex items-center justify-center text-primary-dark lg:hidden">
               <Icon name="cross" size={22} />
             </div>
-            <div className="min-w-0">
-              <p className="text-[13px] font-medium text-gold-light">{roleLabel}</p>
-              <p className="text-[22px] font-extrabold leading-tight truncate">
-                أهلًا {firstName}
-              </p>
-            </div>
+            {profileHref ? (
+              // الاسم نفسه هو المدخل لملف المستخدم (بدل "حسابي" في الشريط السفلي).
+              <Link
+                href={profileHref}
+                prefetch={false}
+                aria-label={`ملفي الشخصي: ${userName}`}
+                className="min-w-0 rounded-2xl -mx-2 px-2 py-1 transition-colors hover:bg-parchment/10"
+              >
+                <p className="text-[13px] font-medium text-gold-light">{roleLabel}</p>
+                <p className="text-[22px] font-extrabold leading-tight truncate flex items-center gap-1.5">
+                  أهلًا {firstName}
+                  <Icon name="chevronLeft" size={18} strokeWidth={2.5} className="opacity-70" />
+                </p>
+              </Link>
+            ) : (
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium text-gold-light">{roleLabel}</p>
+                <p className="text-[22px] font-extrabold leading-tight truncate">أهلًا {firstName}</p>
+              </div>
+            )}
             <form action={signOutAction} className="ms-auto lg:hidden">
               <button
                 type="submit"

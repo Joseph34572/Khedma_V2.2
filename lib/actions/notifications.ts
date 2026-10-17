@@ -79,8 +79,8 @@ export async function sendNotificationAction(_prev: ComposeState, formData: Form
     if (!me) throw new ExpectedError("غير مسجّل الدخول");
 
     const role = me.role as AppRole;
-    if (role !== "super_admin" && role !== "general_secretary" && role !== "stage_secretary") {
-      throw new ExpectedError("إرسال الإشعارات متاح للمدير/الأمين العام وأمين الخدمة فقط.");
+    if (role === "member") {
+      throw new ExpectedError("إرسال الإشعارات متاح للخدام والأمناء فقط.");
     }
 
     const title = String(formData.get("title") ?? "").trim();
@@ -112,7 +112,12 @@ export async function sendNotificationAction(_prev: ComposeState, formData: Form
     if (resolved.error || !resolved.ids) return { error: resolved.error ?? "تعذّر تحديد المستلمين.", success: null };
     if (resolved.ids.length === 0) return { error: "لا يوجد مستلمون مطابقون لهذا الاستهداف.", success: null };
 
-    const { data: notification, error: notifError } = await supabase
+    // المستلمين اتحددوا فوق بعميل المستخدم نفسه (RLS)، فالخادم/أمين المرحلة مش بيوصل غير
+    // لناس مرحلته، والفئات المسموحة اتفلترت حسب دوره. الإدراج نفسه بيتم بعميل service لأن
+    // سياسات RLS على جدولي الإشعارات بتسمح بالكتابة للأمناء والمدير بس، والخادم بقى من حقه
+    // يبعت لمرحلته — والتحقق من الصلاحية والمستلمين اتعمل هنا على السيرفر قبل الإدراج.
+    const service = createServiceClient();
+    const { data: notification, error: notifError } = await service
       .from("notifications")
       .insert({
         title,
@@ -135,12 +140,12 @@ export async function sendNotificationAction(_prev: ComposeState, formData: Form
       channel: "in_app" as const,
       delivered_at: new Date().toISOString()
     }));
-    const { error: recipientsError } = await supabase.from("notification_recipients").insert(rows);
+    const { error: recipientsError } = await service.from("notification_recipients").insert(rows);
     if (recipientsError) return { error: "تم إنشاء الإشعار لكن تعذّر إرساله لبعض المستلمين.", success: null };
 
     // بنسجّل العنوان وعدد المستلمين بس (مش النص الكامل) عشان السجل يفضل خفيف —
     // النص الكامل أصلًا محفوظ في جدول notifications نفسه.
-    await logAuditEvent(createServiceClient(), {
+    await logAuditEvent(service, {
       actorId: user.id,
       action: "send_notification",
       entityType: "notification",

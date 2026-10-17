@@ -17,7 +17,8 @@ function psalmIncipit(body: string): string {
  */
 function displayTitle(title: string, body: string): string {
   if (!title.includes("المزمور")) return title;
-  const clean = title.replace(/^\(\d+\)\s*/, "");
+  // "(1) المزمور الأول" → "المزمور الأول"، و"(المزمور الثالث)" (نصف الليل) → "المزمور الثالث".
+  const clean = title.replace(/^\(\d+\)\s*/, "").replace(/^\((.+)\)$/, "$1");
   const incipit = psalmIncipit(body);
   return incipit ? `${clean} (${incipit})` : clean;
 }

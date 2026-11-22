@@ -1,0 +1,82 @@
+#!/bin/bash
+# netlab-dhcp - small wrapper around the busybox DHCP client (udhcpc).
+#
+#   netlab-dhcp start   <iface>   start the client in the background (keeps retrying)
+#   netlab-dhcp renew   <iface>   ask for a lease now; wait up to 15 s for an answer
+#   netlab-dhcp release <iface>   give the lease back; the interface keeps no address
+#   netlab-dhcp stop    <iface>   stop the client
+#
+# The lease details are written to /run/netlab/dhcp-<iface>.lease by
+# udhcpc.script, where ipconfig (winsh) reads them.
+RUN=${NETLAB_RUN:-/run/netlab}
+action=${1:-}
+ifc=${2:-eth1}
+pidfile=$RUN/udhcpc.$ifc.pid
+lease=$RUN/dhcp-$ifc.lease
+failed=$RUN/dhcp-$ifc.failed
+
+running() {
+    [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+}
+
+# Waits until the lease file (or the "failed" marker) is newer than $1.
+# Returns 0 when a lease was obtained, 1 on failure or timeout.
+wait_result() {
+    local since=$1 i t
+    for i in $(seq 1 75); do                     # 75 x 0.2 s = 15 s
+        if [ -f "$lease" ]; then
+            t=$(sed -n 's/^OBTAINED=//p' "$lease")
+            [ "${t:-0}" -ge "$since" ] && return 0
+        fi
+        if [ -f "$failed" ] && [ "$(cat "$failed")" -ge "$since" ]; then
+            return 1
+        fi
+        sleep 0.2
+    done
+    return 1
+}
+
+start_client() {
+    echo dhcp > "$RUN/mode-$ifc"
+    ip link set "$ifc" up
+    # -b: go to the background if no lease yet and keep trying every 10 s (-A)
+    # -t 3 -T 2: three DHCPDISCOVERs, 2 s apart, per attempt
+    udhcpc -i "$ifc" -s /usr/local/lib/netlab/udhcpc.script -p "$pidfile" \
+           -b -t 3 -T 2 -A 10 -x hostname:"$(hostname)" >/dev/null 2>&1
+}
+
+case "$action" in
+    start)
+        running || start_client
+        ;;
+    renew)
+        now=$(date +%s)
+        if running; then
+            kill -USR1 "$(cat "$pidfile")"       # USR1 = renew / ask again
+            wait_result "$now"
+        else
+            start_client                         # returns after the first attempt
+            wait_result "$now"
+        fi
+        ;;
+    release)
+        if running; then
+            kill -USR2 "$(cat "$pidfile")"       # USR2 = send DHCPRELEASE
+            sleep 0.3
+        fi
+        ip -4 addr flush dev "$ifc"
+        ip route del default dev "$ifc" 2>/dev/null
+        rm -f "$lease"
+        echo dhcp > "$RUN/mode-$ifc"
+        ;;
+    stop)
+        if running; then
+            kill "$(cat "$pidfile")" 2>/dev/null
+        fi
+        rm -f "$pidfile"
+        ;;
+    *)
+        echo "usage: netlab-dhcp start|renew|release|stop <iface>" >&2
+        exit 2
+        ;;
+esac

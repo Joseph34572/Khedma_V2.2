@@ -1,0 +1,12 @@
+#!/bin/sh
+# Started by telnetd for every console connection (TCP port 5000 in the node).
+# Each image picks its console program with the NETLAB_CONSOLE_SHELL variable:
+#   Linux PC     -> bash (default)
+#   Windows PC   -> /usr/local/bin/winsh  (CMD-like shell)
+#   Linux FW     -> /usr/local/bin/fw     (firewall CLI)
+cd /root 2>/dev/null || cd /
+export TERM="${TERM:-xterm}"
+if [ -n "$NETLAB_CONSOLE_SHELL" ]; then
+    exec "$NETLAB_CONSOLE_SHELL"
+fi
+exec /bin/bash -l

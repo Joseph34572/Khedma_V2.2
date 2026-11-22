@@ -1,0 +1,46 @@
+{
+  "_readme": "NetLab settings. On first run this file is copied to settings.json; edit settings.json, not this file. Every limit NetLab uses comes from here or from the detected hardware - nothing is hard-coded in the scripts.",
+
+  "paths": {
+    "_readme": "Empty = chosen by Setup (SSD for the WSL distro, HDD for data if you have one).",
+    "distroDir": "",
+    "dataDir": ""
+  },
+
+  "wsl": {
+    "distroName": "NetLab",
+    "baseImage": "Ubuntu-24.04",
+    "_memory": "WSL max memory = total RAM - max(memoryReserveMinGB, memoryReservePercent % of RAM). 8 GB -> 5 GB, 16 GB -> 12 GB, 32 GB -> 24 GB.",
+    "memoryReservePercent": 25,
+    "memoryReserveMinGB": 3,
+    "swapGB": 2,
+    "_autoMemoryReclaim": "gradual | dropCache | disabled. Gives memory WSL is not using back to Windows.",
+    "autoMemoryReclaim": "gradual"
+  },
+
+  "deploy": {
+    "_maxWorkers": "How many nodes boot in parallel. 0 = one per CPU thread.",
+    "maxWorkers": 0,
+    "_bootTimeoutS": "How long to wait for every node to finish booting after a deploy.",
+    "bootTimeoutS": 600
+  },
+
+  "ram": {
+    "_readme": "Only used to WARN before starting a lab. Nothing is reserved. Update these after measuring (Lab menu -> boot time & RAM report).",
+    "estimatesMB": {
+      "cisco_iol": 350,
+      "cisco_iol_L2": 350,
+      "cisco_asav": 2300,
+      "linux": 15,
+      "default": 300
+    },
+    "safetyMarginMB": 512,
+    "_vmKinds": "Node kinds that are full virtual machines (QEMU). NetLab warns before starting them.",
+    "vmKinds": ["cisco_asav"]
+  },
+
+  "tests": {
+    "_retries": "Connectivity tests retry this many times (5 s apart) while routing converges.",
+    "retries": 12
+  }
+}

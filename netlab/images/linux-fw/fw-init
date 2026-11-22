@@ -1,0 +1,19 @@
+#!/bin/bash
+# Start-up script of the NetLab Linux firewall.
+# Loads the startup configuration (/etc/netlab/fw.conf) and starts the
+# console and SSH. The lab topology mounts its own fw.conf over the default.
+source /usr/local/lib/netlab/common.sh
+
+wait_for_links
+isolate_mgmt
+
+if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" != 1 ]; then
+    log "WARNING: IP forwarding is off. Add this to the node in the topology:"
+    log "           sysctls: { net.ipv4.ip_forward: 1 }"
+fi
+
+fw --load-startup || log "the startup configuration has errors (see above)"
+
+start_services
+log "$(hostname) firewall is ready"
+wait_forever

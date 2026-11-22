@@ -1,0 +1,4 @@
+# Your personal settings (created from config/settings.default.json on first run)
+config/settings.json
+# Reports and other files the scripts write
+state/

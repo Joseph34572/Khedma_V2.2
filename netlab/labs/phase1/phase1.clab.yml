@@ -1,0 +1,98 @@
+# Description: Phase 1 sample - 3 routers OSPF, L2 switch (2 VLANs + trunk), firewall, 2 PCs
+#
+#                    Lo0 2.2.2.2
+#                       [R2]
+#              e0/1 .2 /    \ e0/2 .1
+#       10.0.12.0/30  /      \  10.0.23.0/30
+#              e0/2 .1/      \ e0/2 .2
+#   Lo0 1.1.1.1  [R1]----------[R3]  Lo0 3.3.3.3
+#           e0/1 ||  e0/3 .1  .2 e0/1 | e0/3 .1
+#  trunk VLAN 10,20  10.0.13.0/30     |  10.0.34.0/30
+#           e0/1 ||                   | eth1 .2  (zone inside)
+#              [SW1] IOL-L2         [FW1] Linux firewall, NAT
+#          e0/2 /    \ e0/3           | eth2 .1  (zone outside) 203.0.113.0/24
+#       VLAN 10     VLAN 20           |
+#   [PC1] Linux    [PC2] Windows    [SRV1] "Internet" web server 203.0.113.10
+#   192.168.10.10  DHCP from R1
+#
+# - R1 routes between the VLANs (router-on-a-stick) and is DHCP + DNS server.
+# - OSPF area 0 on R1, R2, R3. R3 sends a default route towards FW1.
+# - FW1 lets the inside reach the "Internet" (ping, web, DNS) with NAT and
+#   blocks connections from the outside.
+# - SRV1 is an extra tiny Linux node so the firewall has something to protect
+#   the lab from (about 5 MB RAM).
+#
+# Consoles: every node publishes its console (container port 5000) and SSH
+# (port 22) on 127.0.0.1 only. PuTTY: Telnet, host 127.0.0.1, port 5001...
+# Interface names: IOL accepts Ethernet0/1 (= eth1); Linux nodes use eth1, eth2.
+name: phase1
+
+mgmt:
+  network: netlab-mgmt          # management network (eth0 / Ethernet0/0 of every node)
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  defaults:
+    # A node that crashes or is restarted by Docker comes back without its lab
+    # links, so do not restart automatically; redeploy instead.
+    restart-policy: "no"
+
+  kinds:
+    cisco_iol:
+      # Set by import-iol.sh (/var/lib/netlab/images.env); the value after := is the default.
+      image: ${NETLAB_IOL_IMAGE:=vrnetlab/cisco_iol:17.12.01}
+
+  nodes:
+    R1:
+      kind: cisco_iol
+      startup-config: configs/R1.partial.cfg
+      ports: ["127.0.0.1:5001:5000", "127.0.0.1:2201:22"]
+    R2:
+      kind: cisco_iol
+      startup-config: configs/R2.partial.cfg
+      ports: ["127.0.0.1:5002:5000", "127.0.0.1:2202:22"]
+    R3:
+      kind: cisco_iol
+      startup-config: configs/R3.partial.cfg
+      ports: ["127.0.0.1:5003:5000", "127.0.0.1:2203:22"]
+    SW1:
+      kind: cisco_iol
+      type: L2
+      image: ${NETLAB_IOL_L2_IMAGE:=vrnetlab/cisco_iol:L2-17.12.01}
+      startup-config: configs/SW1.partial.cfg
+      ports: ["127.0.0.1:5004:5000", "127.0.0.1:2204:22"]
+    FW1:
+      kind: linux
+      image: netlab/linux-fw:1.0
+      binds: ["configs/FW1.fw.conf:/etc/netlab/fw.conf"]
+      sysctls: { net.ipv4.ip_forward: 1 }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5005:5000", "127.0.0.1:2205:22"]
+    PC1:
+      kind: linux
+      image: netlab/linux-pc:1.0
+      env: { IP: 192.168.10.10/24, GW: 192.168.10.1, DNS: 192.168.10.1, DOMAIN: lab }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5006:5000", "127.0.0.1:2206:22"]
+    PC2:
+      kind: linux
+      image: netlab/win-pc:1.0
+      env: { IP: dhcp }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5007:5000", "127.0.0.1:2207:22"]
+    SRV1:
+      kind: linux
+      image: netlab/linux-pc:1.0
+      env: { IP: 203.0.113.10/24, GW: 203.0.113.1, WEB: "1" }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5008:5000", "127.0.0.1:2208:22"]
+
+  links:
+    - endpoints: ["R1:Ethernet0/2", "R2:Ethernet0/1"]
+    - endpoints: ["R1:Ethernet0/3", "R3:Ethernet0/1"]
+    - endpoints: ["R2:Ethernet0/2", "R3:Ethernet0/2"]
+    - endpoints: ["R1:Ethernet0/1", "SW1:Ethernet0/1"]     # 802.1Q trunk
+    - endpoints: ["SW1:Ethernet0/2", "PC1:eth1"]           # access VLAN 10
+    - endpoints: ["SW1:Ethernet0/3", "PC2:eth1"]           # access VLAN 20
+    - endpoints: ["R3:Ethernet0/3", "FW1:eth1"]            # firewall inside
+    - endpoints: ["FW1:eth2", "SRV1:eth1"]                 # firewall outside

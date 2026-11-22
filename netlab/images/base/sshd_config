@@ -1,0 +1,10 @@
+# NetLab lab node SSH server. Lab only: root may log in with a password.
+# The port is published on 127.0.0.1 only (see the lab topology), so it is
+# not reachable from your LAN unless you change that on purpose.
+Port 22
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+UseDNS no
+PrintMotd no
+Subsystem sftp internal-sftp

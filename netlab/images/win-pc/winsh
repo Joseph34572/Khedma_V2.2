@@ -1,0 +1,974 @@
+#!/bin/bash
+# winsh - a small Windows CMD-like shell for NetLab "Windows PC" nodes.
+#
+# The node is really a tiny Alpine Linux container. winsh reads Windows
+# commands, runs the matching Linux tool and prints the result the way
+# cmd.exe would. Supported commands (case does not matter):
+#
+#   ipconfig [/all | /release [adapter] | /renew [adapter] | /flushdns]
+#   ping [-t] [-n count] [-l size] [-w timeout] [-i TTL] target
+#   tracert [-d] [-h max_hops] [-w timeout] target
+#   arp -a | arp -d [ip] | arp -s ip mac
+#   nslookup name [server]
+#   netstat [-a] [-n] [-r]
+#   route print | route add <net> mask <mask> <gateway> | route delete <net>
+#   netsh interface ip set address "Ethernet" static <ip> <mask> [gateway]
+#   netsh interface ip set address "Ethernet" dhcp
+#   netsh interface ip set dns "Ethernet" static <ip> | dhcp
+#   netsh interface ip show config
+#   hostname, cls, ver, echo, help, exit, telnet, ssh, curl
+#
+# Interfaces: eth1 is shown as "Ethernet", eth2 as "Ethernet 2", ...
+# eth0 (the hidden management network) is never shown.
+#
+# Usage: winsh            interactive (console, SSH login)
+#        winsh -c "cmd"   run one command (used by "ssh root@pc ipconfig")
+
+source "${NETLAB_LIB:-/usr/local/lib/netlab}/common.sh"
+
+PROMPT='C:\>'
+INTERRUPTED=0
+NO_BLANK_LINE=0           # set by "cls" so no empty line is printed after it
+
+# ---------------------------------------------------------------- helpers --
+
+# Splits a command line into the ARGS array. "Double quotes" group words,
+# like cmd.exe does: netsh ... "Ethernet 2" -> one argument.
+split_args() {
+    local s=$1 cur="" inq=0 have=0 c i
+    ARGS=()
+    for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        if [[ $c == '"' ]]; then
+            inq=$((1 - inq)); have=1
+        elif [[ $c == [[:space:]] && $inq == 0 ]]; then
+            ((have)) && ARGS+=("$cur")
+            cur=""; have=0
+        else
+            cur+=$c; have=1
+        fi
+    done
+    ((have)) && ARGS+=("$cur")
+}
+
+is_num()  { [[ $1 =~ ^[0-9]+$ ]]; }
+is_ipv4() {
+    [[ $1 =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+    local o
+    for o in "${BASH_REMATCH[@]:1}"; do ((o <= 255)) || return 1; done
+}
+
+ip2int() { local IFS=. a b c d; read -r a b c d <<<"$1"; echo $(( (a << 24) | (b << 16) | (c << 8) | d )); }
+int2ip() { local n=$1; echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"; }
+
+# 24 -> 255.255.255.0
+cidr2mask() {
+    local p=$1 m="" i
+    for i in 1 2 3 4; do
+        if ((p >= 8)); then m+=255; p=$((p - 8))
+        else m+=$((256 - (1 << (8 - p)))); p=0; fi
+        ((i < 4)) && m+=.
+    done
+    echo "$m"
+}
+
+# 255.255.255.0 -> 24 (fails for an invalid mask)
+mask2cidr() {
+    local IFS=. o c=0 seen_zero=0
+    is_ipv4 "$1" || return 1
+    for o in $1; do
+        case $o in
+            255) ((seen_zero)) && return 1; c=$((c + 8)) ;;
+            254|252|248|240|224|192|128)
+                ((seen_zero)) && return 1
+                case $o in 254) c=$((c+7));; 252) c=$((c+6));; 248) c=$((c+5));;
+                           240) c=$((c+4));; 224) c=$((c+3));; 192) c=$((c+2));; 128) c=$((c+1));; esac
+                seen_zero=1 ;;
+            0) seen_zero=1 ;;
+            *) return 1 ;;
+        esac
+    done
+    echo "$c"
+}
+
+# network / broadcast address of "ip/prefix"
+net_of()   { local ip=${1%/*} p=${1#*/}; int2ip $(( $(ip2int "$ip") & ( (0xFFFFFFFF << (32 - p)) & 0xFFFFFFFF ) )); }
+bcast_of() { local ip=${1%/*} p=${1#*/}; int2ip $(( $(ip2int "$ip") | ( 0xFFFFFFFF >> p ) )); }
+
+adapter_name() {                       # eth1 -> Ethernet, eth2 -> Ethernet 2
+    local n=${1#eth}
+    if ((n == 1)); then echo "Ethernet"; else echo "Ethernet $n"; fi
+}
+
+adapter_iface() {                      # "Ethernet 2" / "eth2" -> eth2
+    local a=${1,,} ifc
+    case $a in
+        ethernet)                 ifc=eth1 ;;
+        "ethernet "[0-9]*)        ifc="eth${a#ethernet }" ;;
+        eth[1-9]*)                ifc=$a ;;
+        *)                        return 1 ;;
+    esac
+    [[ -e $SYSNET/$ifc ]] || return 1
+    echo "$ifc"
+}
+
+iface_v4()   { ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}'; }
+iface_v6ll() { ip -6 -o addr show dev "$1" scope link 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1; }
+iface_gw()   { ip -4 route show default dev "$1" 2>/dev/null | awk '{print $3; exit}'; }
+iface_mac()  { cat "$SYSNET/$1/address"; }
+iface_idx()  { cat "$SYSNET/$1/ifindex"; }
+iface_up()   { [[ $(cat "$SYSNET/$1/operstate" 2>/dev/null) == up ]]; }
+mac_win()    { local m=${1^^}; echo "${m//:/-}"; }      # aa:bb:.. -> AA-BB-..
+
+dns_servers() { awk '/^nameserver/ {print $2}' "$RESOLV" 2>/dev/null; }
+dns_suffix()  { awk '/^(search|domain)/ {print $2; exit}' "$RESOLV" 2>/dev/null; }
+
+# "Sunday, November 22, 2026 9:05:01 AM" (Windows date style)
+win_date() {
+    local d
+    d=$(date -d "@$1" '+%A, %B %d, %Y %I:%M:%S %p' 2>/dev/null) || return
+    d=$(sed -E 's/ 0([0-9]),/ \1,/; s/ 0([0-9]):/ \1:/' <<<"$d")
+    echo "$d"
+}
+
+# Prints one "   Label . . . . : value" line. The label already contains its
+# dot leader, exactly as Windows writes it. Extra values go on new lines.
+field() {
+    printf '   %s: %s\n' "$1" "${2:-}"
+    local v
+    for v in "${@:3}"; do printf '%39s%s\n' "" "$v"; done
+}
+
+# Resolves a name to an IPv4 address. Prints "<address> <name used>", e.g.
+# "3.3.3.3 r3.lab": single-label names get the DNS search domain, like Windows.
+resolve4() {
+    local n=$1 cand out a
+    if is_ipv4 "$n"; then echo "$n $n"; return 0; fi
+    if [[ ${n,,} == localhost ]]; then echo "127.0.0.1 $n"; return 0; fi
+    if [[ ${n,,} == "$(hostname | tr 'A-Z' 'a-z')" ]]; then
+        a=$(first_lab_ipv4); [[ -n $a ]] && { echo "$a $n"; return 0; }
+    fi
+    [[ -z $(dns_servers) ]] && return 1
+    local -a cands=("$n")
+    local sfx; sfx=$(dns_suffix)
+    [[ $n != *.* && -n $sfx ]] && cands=("$n.$sfx" "$n")
+    for cand in "${cands[@]}"; do
+        out=$(timeout 6 nslookup -type=a "$cand" 2>/dev/null) || true
+        a=$(awk '/^Name:/ {seen=1} seen && /^Address/ {print $NF; exit}' <<<"$out")
+        a=${a%%#*}
+        if is_ipv4 "$a"; then echo "$a $cand"; return 0; fi
+    done
+    return 1
+}
+
+first_lab_ipv4() {
+    local ifc a
+    for ifc in $(lab_ifaces); do
+        a=$(iface_v4 "$ifc" | head -n1)
+        [[ -n $a ]] && { echo "${a%/*}"; return; }
+    done
+}
+
+not_recognized() {
+    echo "'$1' is not recognized as an internal or external command,"
+    echo "operable program or batch file."
+}
+
+# ---------------------------------------------------------------- ipconfig --
+
+adapter_block() {
+    local ifc=$1 all=$2 name mode ll a sfx=""
+    local IP="" PREFIX="" ROUTER="" DNS="" DOMAIN="" SERVER="" LEASE=0 OBTAINED=0
+    name=$(adapter_name "$ifc")
+    mode=$(iface_mode "$ifc")
+    printf '\nEthernet adapter %s:\n\n' "$name"
+
+    if ! iface_up "$ifc"; then
+        field "Media State . . . . . . . . . . . " "Media disconnected"
+        field "Connection-specific DNS Suffix  . " ""
+        if ((all)); then
+            field "Description . . . . . . . . . . . " "NetLab Virtual Ethernet Adapter"
+            field "Physical Address. . . . . . . . . " "$(mac_win "$(iface_mac "$ifc")")"
+            field "DHCP Enabled. . . . . . . . . . . " "$([[ $mode == dhcp ]] && echo Yes || echo No)"
+            field "Autoconfiguration Enabled . . . . " "Yes"
+        fi
+        return
+    fi
+
+    if [[ $mode == dhcp && -f $NETLAB_RUN/dhcp-$ifc.lease ]]; then
+        # shellcheck disable=SC1090
+        source "$NETLAB_RUN/dhcp-$ifc.lease"
+        sfx=$DOMAIN
+    fi
+
+    field "Connection-specific DNS Suffix  . " "$sfx"
+    if ((all)); then
+        field "Description . . . . . . . . . . . " "NetLab Virtual Ethernet Adapter"
+        field "Physical Address. . . . . . . . . " "$(mac_win "$(iface_mac "$ifc")")"
+        field "DHCP Enabled. . . . . . . . . . . " "$([[ $mode == dhcp ]] && echo Yes || echo No)"
+        field "Autoconfiguration Enabled . . . . " "Yes"
+    fi
+
+    ll=$(iface_v6ll "$ifc")
+    if [[ -n $ll ]]; then
+        field "Link-local IPv6 Address . . . . . " "$ll%$(iface_idx "$ifc")$( ((all)) && echo '(Preferred)')"
+    fi
+
+    for a in $(iface_v4 "$ifc"); do
+        if [[ $a == 169.254.* ]]; then
+            field "Autoconfiguration IPv4 Address. . " "${a%/*}$( ((all)) && echo '(Preferred)')"
+        else
+            field "IPv4 Address. . . . . . . . . . . " "${a%/*}$( ((all)) && echo '(Preferred)')"
+        fi
+        field "Subnet Mask . . . . . . . . . . . " "$(cidr2mask "${a#*/}")"
+    done
+
+    if ((all)) && [[ $mode == dhcp ]] && ((OBTAINED > 0)); then
+        field "Lease Obtained. . . . . . . . . . " "$(win_date "$OBTAINED")"
+        field "Lease Expires . . . . . . . . . . " "$(win_date $((OBTAINED + LEASE)))"
+    fi
+
+    field "Default Gateway . . . . . . . . . " "$(iface_gw "$ifc")"
+
+    if ((all)); then
+        [[ $mode == dhcp && -n $SERVER ]] && field "DHCP Server . . . . . . . . . . . " "$SERVER"
+        # shellcheck disable=SC2046
+        field "DNS Servers . . . . . . . . . . . " $(dns_servers)
+        field "NetBIOS over Tcpip. . . . . . . . " "Enabled"
+    fi
+}
+
+ipconfig_show() {
+    local all=$1 ifc sfx
+    printf '\nWindows IP Configuration\n\n'
+    if ((all)); then
+        field "Host Name . . . . . . . . . . . . " "$(hostname)"
+        field "Primary Dns Suffix  . . . . . . . " ""
+        field "Node Type . . . . . . . . . . . . " "Hybrid"
+        field "IP Routing Enabled. . . . . . . . " "No"
+        field "WINS Proxy Enabled. . . . . . . . " "No"
+        sfx=$(dns_suffix)
+        [[ -n $sfx ]] && field "DNS Suffix Search List. . . . . . " "$sfx"
+    fi
+    for ifc in $(lab_ifaces); do adapter_block "$ifc" "$all"; done
+}
+
+# Interfaces matching an optional adapter name or pattern ("Eth*").
+select_ifaces() {
+    local sel=${1:-} ifc name
+    for ifc in $(lab_ifaces); do
+        name=$(adapter_name "$ifc")
+        # shellcheck disable=SC2053
+        if [[ -z $sel || ${name,,} == ${sel,,} || $ifc == "${sel,,}" ]]; then echo "$ifc"; fi
+    done
+}
+
+ipconfig_release_renew() {
+    local action=$1 sel=${2:-} ifc name any=0 errors=()
+    local -a ifcs
+    mapfile -t ifcs < <(select_ifaces "$sel")
+    printf '\nWindows IP Configuration\n\n'
+    if ((${#ifcs[@]} == 0)); then
+        echo "The operation failed as no adapter is in the state permissible for"
+        echo "this operation."
+        return 1
+    fi
+    for ifc in "${ifcs[@]}"; do
+        [[ $(iface_mode "$ifc") == dhcp ]] || continue
+        any=1
+        name=$(adapter_name "$ifc")
+        if ! iface_up "$ifc"; then
+            echo "No operation can be performed on $name while it has its media disconnected."
+            continue
+        fi
+        if [[ $action == release ]]; then
+            netlab-dhcp release "$ifc"
+        else
+            netlab-dhcp renew "$ifc" ||
+                echo "An error occurred while renewing interface $name : unable to contact your DHCP server. Request has timed out."
+        fi
+    done
+    if ((!any)); then
+        echo "The operation failed as no adapter is in the state permissible for"
+        echo "this operation."
+        return 1
+    fi
+    for ifc in "${ifcs[@]}"; do adapter_block "$ifc" 0; done
+}
+
+ipconfig_usage() {
+    cat <<'EOF'
+
+USAGE:
+    ipconfig [/? | /all | /release [adapter] | /renew [adapter] | /flushdns]
+
+where
+    adapter         Connection name (wildcard characters * and ? allowed)
+
+    Options:
+       /?           Display this help message
+       /all         Display full configuration information.
+       /release     Release the IPv4 address for the specified adapter.
+       /renew       Renew the IPv4 address for the specified adapter.
+       /flushdns    Purges the DNS Resolver cache.
+EOF
+}
+
+cmd_ipconfig() {
+    case ${1,,} in
+        "")         ipconfig_show 0 ;;
+        /all|-all)  ipconfig_show 1 ;;
+        /release|-release) ipconfig_release_renew release "${2:-}" ;;
+        /renew|-renew)     ipconfig_release_renew renew "${2:-}" ;;
+        /flushdns|-flushdns)
+            printf '\nWindows IP Configuration\n\nSuccessfully flushed the DNS Resolver Cache.\n' ;;
+        /\?|-\?)    ipconfig_usage ;;
+        *)          echo; echo "Error: unrecognized or incomplete command line."; ipconfig_usage; return 1 ;;
+    esac
+}
+
+# -------------------------------------------------------------------- ping --
+
+ping_usage() {
+    cat <<'EOF'
+
+Usage: ping [-t] [-n count] [-l size] [-w timeout] [-i TTL] target_name
+
+Options:
+    -t             Ping the specified host until stopped.
+                   To stop - type Control-C.
+    -n count       Number of echo requests to send.
+    -l size        Send buffer size.
+    -w timeout     Timeout in milliseconds to wait for each reply.
+    -i TTL         Time To Live.
+EOF
+}
+
+cmd_ping() {
+    local count=4 forever=0 size=32 wait_ms=4000 ttl="" target="" a
+    while (($#)); do
+        a=${1,,}
+        case $a in
+            -t|/t) forever=1 ;;
+            -n|/n) shift; count=${1:-}
+                   { is_num "$count" && ((count >= 1)); } || { echo "Bad value for option -n, valid range is from 1 to 4294967295."; return 1; } ;;
+            -l|/l) shift; size=${1:-}
+                   { is_num "$size" && ((size <= 65500)); } || { echo "Bad value for option -l, valid range is from 0 to 65500."; return 1; } ;;
+            -w|/w) shift; wait_ms=${1:-}
+                   is_num "$wait_ms" || { echo "Bad value for option -w."; return 1; } ;;
+            -i|/i) shift; ttl=${1:-}
+                   { is_num "$ttl" && ((ttl >= 1 && ttl <= 255)); } || { echo "Bad value for option -i, valid range is from 1 to 255."; return 1; } ;;
+            -4|/4|-a|/a) ;;                     # accepted, nothing to do
+            -\?|/\?) ping_usage; return 0 ;;
+            -*|/*) echo "Bad option $1."; ping_usage; return 1 ;;
+            *) target=$1 ;;
+        esac
+        shift
+    done
+    [[ -z $target ]] && { ping_usage; return 1; }
+
+    local ip res fqdn
+    if ! res=$(resolve4 "$target"); then
+        echo "Ping request could not find host $target. Please check the name and try again."
+        return 1
+    fi
+    read -r ip fqdn <<<"$res"
+
+    echo
+    if [[ $ip == "$target" ]]; then
+        echo "Pinging $ip with $size bytes of data:"
+    else
+        echo "Pinging $fqdn [$ip] with $size bytes of data:"
+    fi
+
+    local sent=0 recv=0 nrtt=0 min=0 max=0 sum=0 out wsec from rtt rttl msg
+    wsec=$(( (wait_ms + 999) / 1000 )); ((wsec < 1)) && wsec=1
+    INTERRUPTED=0
+    while ((forever || sent < count)); do
+        out=$(LC_ALL=C ping -n -c 1 -W "$wsec" -s "$size" ${ttl:+-t "$ttl"} "$ip" 2>&1)
+        ((INTERRUPTED)) && break
+        sent=$((sent + 1))
+        if [[ $out =~ bytes\ from\ ([0-9.]+):.*ttl=([0-9]+)\ time=([0-9.]+) ]]; then
+            from=${BASH_REMATCH[1]}; rttl=${BASH_REMATCH[2]}; rtt=${BASH_REMATCH[3]%.*}
+            recv=$((recv + 1)); nrtt=$((nrtt + 1)); sum=$((sum + rtt))
+            ((nrtt == 1 || rtt < min)) && min=$rtt
+            ((rtt > max)) && max=$rtt
+            if ((rtt < 1)); then
+                echo "Reply from $from: bytes=$size time<1ms TTL=$rttl"
+            else
+                echo "Reply from $from: bytes=$size time=${rtt}ms TTL=$rttl"
+            fi
+        elif [[ $out =~ From\ ([0-9.]+).*(Unreachable|unreachable|Time\ to\ live\ exceeded|filtered) ]]; then
+            from=${BASH_REMATCH[1]}
+            case $out in
+                *"Net Unreachable"*)        msg="Destination net unreachable." ;;
+                *"Port Unreachable"*)       msg="Destination port unreachable." ;;
+                *"Time to live exceeded"*)  msg="TTL expired in transit." ;;
+                *)                          msg="Destination host unreachable." ;;
+            esac
+            # Windows counts these error replies as "Received".
+            recv=$((recv + 1))
+            echo "Reply from $from: $msg"
+        else
+            echo "Request timed out."
+            continue                            # the timeout already waited
+        fi
+        if ((forever || sent < count)); then
+            sleep 1
+            ((INTERRUPTED)) && break
+        fi
+    done
+
+    local lost=$((sent - recv)) pct=0
+    ((sent > 0)) && pct=$((lost * 100 / sent))
+    echo
+    echo "Ping statistics for $ip:"
+    echo "    Packets: Sent = $sent, Received = $recv, Lost = $lost ($pct% loss),"
+    if ((nrtt > 0)); then
+        echo "Approximate round trip times in milli-seconds:"
+        echo "    Minimum = ${min}ms, Maximum = ${max}ms, Average = $((sum / nrtt))ms"
+    fi
+    if ((INTERRUPTED)); then echo "Control-C"; echo "^C"; fi
+}
+
+# ----------------------------------------------------------------- tracert --
+
+tracert_usage() {
+    cat <<'EOF'
+
+Usage: tracert [-d] [-h maximum_hops] [-w timeout] target_name
+
+Options:
+    -d                 Do not resolve addresses to hostnames.
+    -h maximum_hops    Maximum number of hops to search for target.
+    -w timeout         Wait timeout milliseconds for each reply.
+EOF
+}
+
+cmd_tracert() {
+    local maxh=30 wait_ms=4000 target="" a
+    while (($#)); do
+        a=${1,,}
+        case $a in
+            -d|/d|-4|/4) ;;
+            -h|/h) shift; maxh=${1:-}
+                   { is_num "$maxh" && ((maxh >= 1 && maxh <= 255)); } || { echo "Bad value for option -h."; return 1; } ;;
+            -w|/w) shift; wait_ms=${1:-}; is_num "$wait_ms" || { echo "Bad value for option -w."; return 1; } ;;
+            -\?|/\?) tracert_usage; return 0 ;;
+            -*|/*) echo "Bad option $1."; tracert_usage; return 1 ;;
+            *) target=$1 ;;
+        esac
+        shift
+    done
+    [[ -z $target ]] && { tracert_usage; return 1; }
+
+    local ip res fqdn
+    if ! res=$(resolve4 "$target"); then
+        echo "Unable to resolve target system name $target."
+        return 1
+    fi
+    read -r ip fqdn <<<"$res"
+
+    echo
+    if [[ $ip == "$target" ]]; then
+        printf 'Tracing route to %s over a maximum of %d hops\n\n' "$ip" "$maxh"
+    else
+        printf 'Tracing route to %s [%s]\nover a maximum of %d hops:\n\n' "$fqdn" "$ip" "$maxh"
+    fi
+
+    local wsec=$(( (wait_ms + 999) / 1000 ))
+    # Windows tracert uses ICMP echo; use it too when busybox supports -I.
+    local -a icmp=()
+    traceroute --help 2>&1 | grep -q -- '-I' && icmp=(-I)
+
+    INTERRUPTED=0
+    # busybox prints:  " 2  10.0.13.2  1.123 ms  0.901 ms  *"
+    # we print:        "  2     1 ms    <1 ms     *     10.0.13.2"
+    traceroute -n "${icmp[@]}" -q 3 -w "$wsec" -m "$maxh" "$ip" 2>/dev/null | awk '
+        $1 ~ /^[0-9]+$/ {
+            n = 0; host = ""
+            for (i = 2; i <= NF; i++) {
+                if ($i == "*")         { p[++n] = "*" }
+                else if ($i == "ms")   { t = int($(i - 1)); p[++n] = (t < 1 ? "<1" : t) }
+                else if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { host = $i }
+            }
+            line = sprintf("%3d", $1)
+            for (k = 1; k <= 3; k++) {
+                if (k > n || p[k] == "*") line = line "     *   "
+                else line = line sprintf("%6s ms", p[k])
+            }
+            line = line "  " (host == "" ? "Request timed out." : host)
+            print line
+            fflush()
+        }'
+    if ((INTERRUPTED)); then echo "^C"; return 1; fi
+    echo
+    echo "Trace complete."
+}
+
+# --------------------------------------------------------------------- arp --
+
+arp_show() {
+    local ifc a found=0
+    for ifc in $(lab_ifaces); do
+        a=$(iface_v4 "$ifc" | head -n1)
+        [[ -z $a ]] && continue
+        found=1
+        printf '\nInterface: %s --- 0x%x\n' "${a%/*}" "$(iface_idx "$ifc")"
+        printf '  %-22s%-22s%s\n' "Internet Address" "Physical Address" "Type"
+        ip -4 neigh show dev "$ifc" | awk '
+            / lladdr / {
+                mac = $3; gsub(":", "-", mac)
+                type = ($NF == "PERMANENT") ? "static" : "dynamic"
+                printf "  %-22s%-22s%s\n", $1, mac, type
+            }'
+        printf '  %-22s%-22s%s\n' "$(bcast_of "$a")" "ff-ff-ff-ff-ff-ff" "static"
+    done
+    ((found)) || echo "No ARP Entries Found."
+}
+
+arp_usage() {
+    cat <<'EOF'
+
+Displays and modifies the IP-to-Physical address translation tables used by
+address resolution protocol (ARP).
+
+ARP -s inet_addr eth_addr
+ARP -d [inet_addr]
+ARP -a
+
+  -a            Displays current ARP entries.
+  -d            Deletes the host specified by inet_addr (or all with *).
+  -s            Adds the host and associates the Internet address inet_addr
+                with the Physical address eth_addr (e.g. 00-aa-00-62-c6-09).
+EOF
+}
+
+cmd_arp() {
+    local ifc
+    case ${1,,} in
+        -a|/a|-g|/g) arp_show ;;
+        -d|/d)
+            if [[ -z ${2:-} || $2 == "*" ]]; then
+                for ifc in $(lab_ifaces); do ip -4 neigh flush dev "$ifc" 2>/dev/null; done
+            else
+                is_ipv4 "$2" || { echo "The ARP entry deletion failed: The parameter is incorrect."; return 1; }
+                ip neigh del "$2" dev "$(ip -4 route get "$2" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')" 2>/dev/null ||
+                    { echo "The ARP entry deletion failed: Element not found."; return 1; }
+            fi ;;
+        -s|/s)
+            local mac=${3:-}; mac=${mac//-/:}
+            { is_ipv4 "${2:-}" && [[ $mac =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]]; } ||
+                { echo "The ARP entry addition failed: The parameter is incorrect."; return 1; }
+            ifc=$(ip -4 route get "$2" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+            ip neigh replace "$2" lladdr "$mac" nud permanent dev "$ifc" ||
+                { echo "The ARP entry addition failed: The parameter is incorrect."; return 1; } ;;
+        *) arp_usage ;;
+    esac
+}
+
+# ---------------------------------------------------------------- nslookup --
+
+cmd_nslookup() {
+    local name=${1:-} server=${2:-} out sfx q
+    if [[ -z $name || $name == "/?" || $name == "-?" ]]; then
+        echo "Usage: nslookup <name> [server]   (interactive mode is not supported)"
+        return 1
+    fi
+    [[ -z $server ]] && server=$(dns_servers | head -n1)
+    if [[ -z $server ]]; then
+        echo "*** Default servers are not available"
+        echo "Server:  UnKnown"
+        echo "Address:  127.0.0.1"
+        echo
+        echo "*** UnKnown can't find $name: No response from server"
+        return 1
+    fi
+    echo "Server:  UnKnown"
+    echo "Address:  $server"
+    echo
+
+    q=$name
+    sfx=$(dns_suffix)
+    [[ $name != *.* && -n $sfx ]] && ! is_ipv4 "$name" && q="$name.$sfx"
+    out=$(timeout 6 nslookup -type=a "$q" "$server" 2>&1)
+    local -a addrs
+    mapfile -t addrs < <(awk '/^Name:/ {seen=1; next} seen && /^Address/ {print $NF}' <<<"$out")
+    if ((${#addrs[@]} > 0)); then
+        echo "Name:    $q"
+        if ((${#addrs[@]} == 1)); then
+            echo "Address:  ${addrs[0]}"
+        else
+            echo "Addresses:  ${addrs[0]}"
+            printf '          %s\n' "${addrs[@]:1}"
+        fi
+        echo
+        return 0
+    fi
+    case $out in
+        *NXDOMAIN*)            echo "*** UnKnown can't find $q: Non-existent domain" ;;
+        *"timed out"*|*"no servers"*|"")
+                               echo "DNS request timed out."
+                               echo "    timeout was 2 seconds."
+                               echo "*** Request to UnKnown timed-out" ;;
+        *)                     echo "*** UnKnown can't find $q: Server failed" ;;
+    esac
+    return 1
+}
+
+# ----------------------------------------------------------------- netstat --
+
+cmd_netstat() {
+    local all=0 route=0 a mgmt
+    for a in "$@"; do
+        a=${a,,}; a=${a#[-/]}
+        [[ $a == *a* ]] && all=1
+        [[ $a == *r* ]] && route=1
+    done
+    if ((route)); then route_print; return; fi
+
+    # Hide the management side (console port 5000, eth0 address).
+    mgmt=$(iface_v4 eth0 | head -n1); mgmt=${mgmt%/*}
+    echo
+    echo "Active Connections"
+    echo
+    printf '  %-7s%-23s%-23s%s\n' "Proto" "Local Address" "Foreign Address" "State"
+    {
+        netstat -ant 2>/dev/null
+        ((all)) && netstat -anu 2>/dev/null
+    } | awk -v all="$all" -v mgmt="$mgmt" '
+        function winaddr(a) {
+            sub(/:\*$/, ":0", a)
+            if (a ~ /^:::/) { a = "[::]:" substr(a, 4) }
+            return a
+        }
+        $1 ~ /^(tcp|udp)/ {
+            proto = toupper(substr($1, 1, 3)); local = $4; foreign = $5; state = $6
+            if (local ~ /:5000$/) next
+            if (mgmt != "" && index(local, mgmt ":") == 1) next
+            if (proto == "TCP") {
+                if (state == "LISTEN") { if (!all) next; state = "LISTENING" }
+                printf "  %-7s%-23s%-23s%s\n", proto, winaddr(local), winaddr(foreign), state
+            } else {
+                printf "  %-7s%-23s%-23s\n", proto, winaddr(local), "*:*"
+            }
+        }'
+}
+
+# ------------------------------------------------------------------- route --
+
+route_print() {
+    local sep="===========================================================================" ifc a ip p
+    echo "$sep"
+    echo "Interface List"
+    for ifc in $(lab_ifaces); do
+        printf '%3s...%s ......%s\n' "$(iface_idx "$ifc")" "$(iface_mac "$ifc" | tr ':' ' ')" \
+            "NetLab Virtual Ethernet Adapter ($(adapter_name "$ifc"))"
+    done
+    printf '%3s...........................%s\n' 1 "Software Loopback Interface 1"
+    echo "$sep"
+    echo
+    echo "IPv4 Route Table"
+    echo "$sep"
+    echo "Active Routes:"
+    echo "Network Destination        Netmask          Gateway       Interface  Metric"
+    {
+        # Routes learned from the kernel (lab interfaces only).
+        ip -4 route show | while read -r dest rest; do
+            [[ $rest == *"dev eth0"* ]] && continue
+            ifc=$(sed -n 's/.*dev \([^ ]*\).*/\1/p' <<<"$rest")
+            a=$(iface_v4 "$ifc" | head -n1); a=${a%/*}
+            [[ -z $a ]] && continue
+            local gw="On-link" metric=281
+            if [[ $rest =~ via\ ([0-9.]+) ]]; then gw=${BASH_REMATCH[1]}; metric=25; fi
+            if [[ $dest == default ]]; then dest=0.0.0.0/0; fi
+            [[ $dest == */* ]] || dest="$dest/32"
+            echo "${dest%/*} $(cidr2mask "${dest#*/}") $gw $a $metric"
+        done
+        # Local and broadcast host routes, like Windows shows them.
+        for ifc in $(lab_ifaces); do
+            for a in $(iface_v4 "$ifc"); do
+                ip=${a%/*}; p=${a#*/}
+                echo "$ip 255.255.255.255 On-link $ip 281"
+                echo "$(bcast_of "$a") 255.255.255.255 On-link $ip 281"
+                echo "224.0.0.0 240.0.0.0 On-link $ip 281"
+                echo "255.255.255.255 255.255.255.255 On-link $ip 281"
+            done
+        done
+        echo "127.0.0.0 255.0.0.0 On-link 127.0.0.1 331"
+        echo "127.0.0.1 255.255.255.255 On-link 127.0.0.1 331"
+        echo "127.255.255.255 255.255.255.255 On-link 127.0.0.1 331"
+        echo "224.0.0.0 240.0.0.0 On-link 127.0.0.1 331"
+        echo "255.255.255.255 255.255.255.255 On-link 127.0.0.1 331"
+    } | sort -u | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | while read -r d m g i mt; do
+        printf '%17s%17s%17s%17s%7s\n' "$d" "$m" "$g" "$i" "$mt"
+    done
+    echo "$sep"
+    echo "Persistent Routes:"
+    echo "  None"
+}
+
+route_usage() {
+    cat <<'EOF'
+
+Manipulates network routing tables.
+
+ROUTE PRINT
+ROUTE ADD destination MASK netmask gateway [METRIC metric]
+ROUTE DELETE destination
+
+  Example:  route ADD 157.0.0.0 MASK 255.0.0.0  157.55.80.1
+EOF
+}
+
+cmd_route() {
+    local sub=${1,,}
+    [[ $sub == -p || $sub == /p ]] && { shift; sub=${1,,}; }
+    case $sub in
+        print) route_print ;;
+        add)
+            local dest=${2:-} mask=255.255.255.255 gw="" p
+            if [[ ${3,,} == mask ]]; then mask=${4:-}; gw=${5:-}; else gw=${3:-}; fi
+            if ! is_ipv4 "$dest" || ! is_ipv4 "$gw" || ! p=$(mask2cidr "$mask"); then
+                echo "The route addition failed: The parameter is incorrect."
+                return 1
+            fi
+            dest=$(net_of "$dest/$p")
+            if ip route add "$dest/$p" via "$gw" 2>/dev/null; then
+                echo " OK!"
+            else
+                echo "The route addition failed: The parameter is incorrect."
+                return 1
+            fi ;;
+        delete)
+            local dest=${2:-} r
+            [[ $dest == 0.0.0.0 ]] && dest=default
+            r=$(ip -4 route show | awk -v d="$dest" '$1 == d || index($1, d "/") == 1 {print $1; exit}')
+            if [[ -n $r ]] && ip route del "$r" 2>/dev/null; then
+                echo " OK!"
+            else
+                echo "The route deletion failed: Element not found."
+                return 1
+            fi ;;
+        *) route_usage ;;
+    esac
+}
+
+# ------------------------------------------------------------------- netsh --
+
+netsh_usage() {
+    cat <<'EOF'
+
+Supported netsh commands (subset):
+  netsh interface ip set address "Ethernet" static <ip> <mask> [gateway]
+  netsh interface ip set address "Ethernet" dhcp
+  netsh interface ip set dns "Ethernet" static <dns-server>
+  netsh interface ip set dns "Ethernet" dhcp
+  netsh interface ip show config
+EOF
+}
+
+# Reads netsh arguments in either form:
+#   "Ethernet" static 10.0.0.5 255.255.255.0 10.0.0.1
+#   name="Ethernet" source=static address=10.0.0.5 mask=255.255.255.0 gateway=10.0.0.1
+netsh_parse() {
+    N_NAME=""; N_SOURCE=""; N_ADDR=""; N_MASK=""; N_GW=""
+    local pos=0 arg key val
+    for arg in "$@"; do
+        if [[ $arg == *=* ]]; then
+            key=${arg%%=*}; key=${key,,}; val=${arg#*=}
+            case $key in
+                name) N_NAME=$val ;;
+                source) N_SOURCE=${val,,} ;;
+                address|addr) N_ADDR=$val ;;
+                mask) N_MASK=$val ;;
+                gateway) N_GW=$val ;;
+            esac
+        else
+            case $pos in
+                0) N_NAME=$arg ;;
+                1) N_SOURCE=${arg,,} ;;
+                2) N_ADDR=$arg ;;
+                3) N_MASK=$arg ;;
+                4) N_GW=$arg ;;
+            esac
+            pos=$((pos + 1))
+        fi
+    done
+}
+
+netsh_set_address() {
+    local ifc p
+    netsh_parse "$@"
+    if ! ifc=$(adapter_iface "$N_NAME"); then
+        echo "The filename, directory name, or volume label syntax is incorrect."
+        echo; return 1
+    fi
+    case $N_SOURCE in
+        dhcp)
+            ip -4 addr flush dev "$ifc"
+            ip route del default dev "$ifc" 2>/dev/null
+            netlab-dhcp start "$ifc" &
+            disown 2>/dev/null
+            echo ;;
+        static)
+            if ! is_ipv4 "$N_ADDR" || ! p=$(mask2cidr "${N_MASK:-255.255.255.0}") ||
+               { [[ -n $N_GW && ${N_GW,,} != none ]] && ! is_ipv4 "$N_GW"; }; then
+                echo "The parameter is incorrect."
+                echo; return 1
+            fi
+            [[ ${N_GW,,} == none ]] && N_GW=""
+            set_static "$ifc" "$N_ADDR/$p" "$N_GW" || { echo "The object already exists."; echo; return 1; }
+            echo ;;
+        *) netsh_usage; return 1 ;;
+    esac
+}
+
+netsh_set_dns() {
+    local ifc
+    netsh_parse "$@"
+    if ! ifc=$(adapter_iface "$N_NAME"); then
+        echo "The filename, directory name, or volume label syntax is incorrect."
+        echo; return 1
+    fi
+    case $N_SOURCE in
+        dhcp)
+            set_dns ""
+            if [[ -f $NETLAB_RUN/dhcp-$ifc.lease ]]; then
+                # shellcheck disable=SC1090
+                ( source "$NETLAB_RUN/dhcp-$ifc.lease"
+                  { [[ -n $DOMAIN ]] && echo "search $DOMAIN"; for d in $DNS; do echo "nameserver $d"; done; } > "$RESOLV" )
+            fi
+            echo ;;
+        static)
+            is_ipv4 "$N_ADDR" || { echo "The parameter is incorrect."; echo; return 1; }
+            set_dns "$N_ADDR" "$(dns_suffix)"
+            echo ;;
+        *) netsh_usage; return 1 ;;
+    esac
+}
+
+netsh_show_config() {
+    local ifc a mode
+    for ifc in $(lab_ifaces); do
+        mode=$(iface_mode "$ifc")
+        echo
+        echo "Configuration for interface \"$(adapter_name "$ifc")\""
+        printf '    %-38s%s\n' "DHCP enabled:" "$([[ $mode == dhcp ]] && echo Yes || echo No)"
+        for a in $(iface_v4 "$ifc"); do
+            printf '    %-38s%s\n' "IP Address:" "${a%/*}"
+            printf '    %-38s%s\n' "Subnet Prefix:" "$(net_of "$a")/${a#*/} (mask $(cidr2mask "${a#*/}"))"
+        done
+        printf '    %-38s%s\n' "Default Gateway:" "$(iface_gw "$ifc")"
+        printf '    %-38s%s\n' "Gateway Metric:" "0"
+        printf '    %-38s%s\n' "InterfaceMetric:" "25"
+        if [[ -f $NETLAB_RUN/dns-static || $mode != dhcp ]]; then
+            printf '    %-38s%s\n' "Statically Configured DNS Servers:" "$(dns_servers | head -n1)"
+        else
+            printf '    %-38s%s\n' "DNS servers configured through DHCP:" "$(dns_servers | head -n1)"
+        fi
+        printf '    %-38s%s\n' "Register with which suffix:" "Primary only"
+        printf '    %-38s%s\n' "WINS servers configured through DHCP:" "None"
+    done
+}
+
+cmd_netsh() {
+    local a0=${1,,} a1=${2,,} a2=${3,,} a3=${4,,}
+    if [[ $a0 == int* && ( $a1 == ip || $a1 == ipv4 ) ]]; then
+        case "$a2 $a3" in
+            "set address")                  netsh_set_address "${@:5}" ;;
+            "set dns"|"set dnsserver"|"set dnsservers") netsh_set_dns "${@:5}" ;;
+            "show config"|"show addresses"|"show address") netsh_show_config ;;
+            *) netsh_usage; return 1 ;;
+        esac
+    else
+        netsh_usage; return 1
+    fi
+}
+
+# -------------------------------------------------------------------- misc --
+
+cmd_help() {
+    cat <<'EOF'
+For more information on a specific command, type COMMAND /?
+ARP            Displays and modifies the IP-to-Physical address translation tables.
+CLS            Clears the screen.
+CURL           Transfers data from or to a server (e.g. curl http://10.0.0.1).
+ECHO           Displays messages.
+EXIT           Quits the shell (closes this console session).
+HOSTNAME       Prints the name of the current host.
+IPCONFIG       Displays the IP configuration (/all, /release, /renew).
+NETSH          Sets the IP address or DNS server of an adapter (subset).
+NETSTAT        Displays protocol statistics and current TCP/IP connections.
+NSLOOKUP       Queries a DNS server.
+PING           Sends ICMP echo requests (-t, -n, -l, -w, -i).
+ROUTE          Displays and changes the IPv4 routing table (print/add/delete).
+SSH            Connects to a host with SSH.
+TELNET         Connects to a host with Telnet (e.g. telnet 10.0.0.1 23).
+TRACERT        Traces the route to a host.
+VER            Displays the version.
+EOF
+}
+
+run_line() {
+    local line=$1 cmd
+    NO_BLANK_LINE=0
+    split_args "$line"
+    ((${#ARGS[@]} == 0)) && return 0
+    cmd=${ARGS[0],,}
+    local -a args=("${ARGS[@]:1}")
+    case $cmd in
+        ipconfig)          cmd_ipconfig "${args[@]}" ;;
+        ping)              cmd_ping "${args[@]}" ;;
+        tracert)           cmd_tracert "${args[@]}" ;;
+        arp)               cmd_arp "${args[@]}" ;;
+        nslookup)          cmd_nslookup "${args[@]}" ;;
+        netstat)           cmd_netstat "${args[@]}" ;;
+        route)             cmd_route "${args[@]}" ;;
+        netsh)             cmd_netsh "${args[@]}" ;;
+        hostname)          hostname ;;
+        cls)               printf '\033[H\033[2J\033[3J'; NO_BLANK_LINE=1 ;;
+        ver)               echo; echo "NetLab Windows PC [Version 10.0, simulated by winsh]" ;;
+        echo)              local rest=${line#*[eE][cC][hH][oO]}; echo "${rest# }" ;;
+        help|/\?)          cmd_help ;;
+        exit|logout)       exit 0 ;;
+        telnet|ssh|curl)   command "$cmd" "${args[@]}" ;;
+        *)                 not_recognized "${ARGS[0]}"; return 1 ;;
+    esac
+}
+
+main() {
+    if [[ ${1:-} == -c ]]; then
+        shift
+        run_line "$*"
+        exit $?
+    fi
+
+    # Ctrl+C stops the running command (ping -t, tracert) but not winsh.
+    trap 'INTERRUPTED=1' INT
+
+    HISTFILE=/root/.winsh_history
+    set -o history
+    history -r 2>/dev/null
+
+    echo "NetLab Windows PC ($(hostname)) - CMD-style shell. Type HELP for commands."
+    echo
+    local line
+    while true; do
+        INTERRUPTED=0
+        if ! IFS= read -e -r -p "$PROMPT" line; then
+            if ((INTERRUPTED)); then echo; continue; fi    # Ctrl+C at the prompt
+            echo
+            exit 0                                         # Ctrl+D / connection closed
+        fi
+        if [[ -z ${line//[[:space:]]/} ]]; then
+            continue
+        fi
+        history -s "$line"
+        history -a 2>/dev/null
+        run_line "$line"
+        ((NO_BLANK_LINE)) || echo
+    done
+}
+
+main "$@"

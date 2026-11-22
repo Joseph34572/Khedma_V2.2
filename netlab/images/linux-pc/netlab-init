@@ -1,0 +1,46 @@
+#!/bin/bash
+# Start-up script of the NetLab "Linux PC" (the "Windows PC" image reuses it).
+#
+# The PC is configured with environment variables in the lab topology:
+#   IP=192.168.10.10/24   fixed address, or IP=dhcp to use DHCP
+#   GW=192.168.10.1       default gateway (fixed address only)
+#   DNS="192.168.10.1"    DNS server(s), space separated (optional)
+#   DOMAIN=lab            DNS search domain (optional)
+#   IFACE=eth1            lab interface to configure (default eth1)
+#   WEB=1                 also run a small web server on port 80
+source /usr/local/lib/netlab/common.sh
+
+wait_for_links          # containerlab adds eth1.. after the container starts
+isolate_mgmt            # eth0 is for console/SSH only, never for lab traffic
+
+ifc=${IFACE:-eth1}
+if [ -e "/sys/class/net/$ifc" ]; then
+    ip link set "$ifc" up
+    case "${IP:-}" in
+        dhcp|DHCP)
+            # In the background: the router may still be booting.
+            netlab-dhcp start "$ifc" &
+            ;;
+        "")
+            log "no IP set for $ifc (set IP=a.b.c.d/nn or IP=dhcp in the topology)"
+            echo static > "$NETLAB_RUN/mode-$ifc"
+            ;;
+        *)
+            set_static "$ifc" "$IP" "${GW:-}" || log "could not set $IP on $ifc"
+            ;;
+    esac
+else
+    log "interface $ifc does not exist (is the node linked in the topology?)"
+fi
+
+[ -n "${DNS:-}" ] && set_dns "$DNS" "${DOMAIN:-}"
+
+if [ "${WEB:-0}" = 1 ]; then
+    [ -f /srv/www/index.html ] || \
+        echo "<h1>Hello from $(hostname)</h1><p>NetLab web server</p>" > /srv/www/index.html
+    httpd -p 80 -h /srv/www
+fi
+
+start_services
+log "$(hostname) is ready"
+wait_forever

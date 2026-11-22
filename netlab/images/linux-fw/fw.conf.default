@@ -1,0 +1,4 @@
+# Default NetLab firewall configuration (used when the lab gives none).
+# Edit it from the console with the "fw" CLI, then "write" to save.
+hostname FW
+default deny

@@ -1,0 +1,50 @@
+# Description: Smoke test without Cisco images - firewall, Linux PC, Windows PC, server
+#
+# Use it to check the whole tool chain (images, consoles in PuTTY, Wireshark
+# capture, firewall, Windows-like shell) before you have IOL images.
+#
+#   [PC1] Linux 10.1.1.10 --eth1-- [FW1] --eth3-- [SRV1] 203.0.113.10 (web)
+#   [PC2] Windows 10.2.2.20 --eth2--/
+#
+#   FW1 eth1 10.1.1.1/24 inside, eth2 10.2.2.1/24 inside, eth3 203.0.113.1/24 outside
+name: smoke
+
+mgmt:
+  network: netlab-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  defaults:
+    restart-policy: "no"
+
+  nodes:
+    FW1:
+      kind: linux
+      image: netlab/linux-fw:1.0
+      binds: ["configs/FW1.fw.conf:/etc/netlab/fw.conf"]
+      sysctls: { net.ipv4.ip_forward: 1 }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5001:5000", "127.0.0.1:2201:22"]
+    PC1:
+      kind: linux
+      image: netlab/linux-pc:1.0
+      env: { IP: 10.1.1.10/24, GW: 10.1.1.1 }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5002:5000", "127.0.0.1:2202:22"]
+    PC2:
+      kind: linux
+      image: netlab/win-pc:1.0
+      env: { IP: 10.2.2.20/24, GW: 10.2.2.1 }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5003:5000", "127.0.0.1:2203:22"]
+    SRV1:
+      kind: linux
+      image: netlab/linux-pc:1.0
+      env: { IP: 203.0.113.10/24, GW: 203.0.113.1, WEB: "1" }
+      cap-add: [NET_ADMIN]
+      ports: ["127.0.0.1:5004:5000", "127.0.0.1:2204:22"]
+
+  links:
+    - endpoints: ["PC1:eth1", "FW1:eth1"]
+    - endpoints: ["PC2:eth1", "FW1:eth2"]
+    - endpoints: ["FW1:eth3", "SRV1:eth1"]

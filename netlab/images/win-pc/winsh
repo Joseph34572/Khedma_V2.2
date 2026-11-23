@@ -946,6 +946,8 @@ main() {
 
     # Ctrl+C stops the running command (ping -t, tracert) but not winsh.
     trap 'INTERRUPTED=1' INT
+    # The terminal must not echo "^C" itself: like cmd.exe, winsh prints its own.
+    stty -echoctl 2>/dev/null
 
     HISTFILE=/root/.winsh_history
     set -o history
